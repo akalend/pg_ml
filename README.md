@@ -1,6 +1,8 @@
 # pg_ml Machine learning module
 
+## folders
 docs - documentation and slides
+
 learn - learn notebooks
 
 ## Prediction
