@@ -1,0 +1,33 @@
+
+PassengerId      int64
+Pclass           int64
+Name            object
+Sex             object
+Age            float64
+SibSp            int64
+Parch            int64
+Ticket          object
+Fare           float64
+Cabin           object
+Embarked        object
+dtype: object
+
+5 |          897 |      3 | Svensson, Mr. Johan Cervin                   | male   |   14.0 |     0 |     0 | 7538      |   9.225 | -999  | S        | f
+
+
+ id           | integer          |           |          | 
+ passenger_id | integer          |           |          | 
+ pclass       | integer          |           |          | 
+ name         | text             |           |          | 
+ sex          | text             |           |          | 
+ age          | double precision |           |          | 
+ sibsp        | integer          |           |          | 
+ parch        | integer          |           |          | 
+ ticket       | text             |           |          | 
+ fare         | double precision |           |          | 
+ cabin        | text             |           |          | 
+ embarked     | character(1)     |           |          | 
+ res          | boolean          |           |       
+
+14.0,9.225 
+"897","3","Svensson, Mr. Johan Cervin","male","0" ,"0", "7538","-999","S"       
