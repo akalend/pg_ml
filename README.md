@@ -24,11 +24,15 @@ Prediction model:
 
 SELECT ml_predict('path/to/model/model.cbt', 'test_tablename', '{Array,of,feature_categorial}');
 
--- binary classification
+-- binary classification. titanic dataset https://www.kaggle.com/competitions/titanic/data
 SELECT ml_predict('titanic.cbt', 'titanic', '{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }');  
 
--- multi classification
-SELECT ml_predict('astra2.cbt', 'astra_test');  
+-- adult dataset https://archive.ics.uci.edu/dataset/2/adult https://www.kaggle.com/datasets/wenruliu/adult-income-dataset
+select ml_predict('adult.cbm','adult2', 'workclass,education,marital-status,occupation,relationship,race,sex,native_country}');
+
+-- multi classification https://www.kaggle.com/code/satoru90/stellar-classification-dataset-sdss17/
+
+SELECT ml_predict('astras.cbt', 'astra_test');  
 ```
 
 ## Before compilation
