@@ -16,17 +16,27 @@ The prediction has so far been made  for:
 ## Installation
 
 - export PG_HOME=/usr/local/pgsql    //where is main postgres folder
+
 - wget https://github.com/catboost/catboost/releases/download/v1.2.2/libcatboostmodel.so
-- mv libcatboostmodel.so $PG_HOME/lib
+
 - git clone https://github.com/akalend/pg_ml.git
+
 - cd pg_ml
+
 - export PG_CONFIG=$PG_HOME/bin/pg_config
+
 - export LD_LIBRARY_PATH=$PG_HOME/lib
+
 - USE_PGXS=1 make
+
 - sudo su
+
 - export PATH=$PATH:$PG_HOME/bin
+
 - USE_PGXS=1 make install
+
 - chown postgres model.cbm
+
 - [optional] cp model.cbm $PG_HOME/data
 
 
