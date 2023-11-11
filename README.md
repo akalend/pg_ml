@@ -1,4 +1,5 @@
-# pg_ml Machine learning module
+# pg_ml Machine learning module 
+in development, don't stable
 
 ## folders
 docs - documentation and slides
@@ -7,7 +8,10 @@ learn - learn notebooks
 
 ## Prediction
 
-The prediction has so far been made only for binary classification.
+The prediction has so far been made  for:
+ - binary classification
+ - multi classification
+ - regression
 
 ## examples
 
@@ -42,5 +46,4 @@ You need add the libcatboostmodel.so to postgres library dir: /usr/local/pgsql/l
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/local/pgsql/lib
 ```
 
-
-
+More detail information You can see in the docs/pg_ml.pdf

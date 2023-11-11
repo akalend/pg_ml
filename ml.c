@@ -31,7 +31,7 @@
 
 
 
-#define ML_VERSION "PgCatBoost 0.2"
+#define ML_VERSION "PgCatBoost 0.0.3"
 #define FIELDLEN 64
 
 typedef struct ArrayDatum {
@@ -293,6 +293,8 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
     initStringInfo(&buf);
     appendStringInfo(&buf, "SELECT * FROM public.%s_predict", tabname);
 
+    elog(WARNING,"type:", modelType);
+
     res = SPI_exec(buf.data, 0);
     
     if (res < 1 || SPI_tuptable == NULL)
@@ -455,6 +457,10 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
             appendStringInfo(&buf, "UPDATE %s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,*p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
 
         }
+        else if (strcmp(modelType, "\"RMSE\"") == 0)
+        {
+            appendStringInfo(&buf, "UPDATE %s_predict SET predict=%f WHERE row=%s;", tabname, result_pa[0],SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+        }
         else
         {
             double probability = sigmoid(result_pa[0]);
@@ -589,7 +595,7 @@ getModelType(ModelCalcerHandle* modelHandle, char* info)
         return buf.data;
     }
 
-    appendStringInfo(&buf, "SELECT '%s'::jsonb #> '{metrics,eval_metric,type}';", info);
+    appendStringInfo(&buf, "SELECT '%s'::jsonb #> '{loss_function,type}';", info);
 
     SPITupleTable *tuptable = SPI_tuptable;
 
@@ -746,30 +752,19 @@ ml_test(PG_FUNCTION_ARGS)
     int         key_count;
     ArrayType  *key_array;
     int i;
-    key_array = PG_GETARG_ARRAYTYPE_P(0);
+    // key_array = PG_GETARG_ARRAYTYPE_P(0);
 
-    if (key_array == NULL) {
-        elog(ERROR, "key is null");
-    }
-
-    Assert(ARR_ELEMTYPE(key_array) == TEXTOID);
+    ModelCalcerHandle* modelHandle;
+    
+    LoadModel(cstring_to_text("titanic.cbm"), &modelHandle);
 
 
-    deconstruct_array(key_array,
-                      TEXTOID, -1, false, TYPALIGN_INT,
-                      &key_datums, &key_nulls, &key_count);
-
-    cat_fields.elements = key_datums;
-    cat_fields.count = key_count;
-
-    for( i = 0; i < key_count; i++ )
-    {
-        elog(NOTICE, "[%d] %s", i,  TextDatumGetCString(*key_datums));
-        // elog(NOTICE, "[%d] %s", i,  text_to_cstring(*key_datums));
-        key_datums++;
-    }
-
+    char* model_info = getModelParms(modelHandle);
+    char* modelType = getModelType(modelHandle, model_info);
     // test(&cat_fields);
+
+    ModelCalcerDelete(modelHandle);
+
 
     PG_RETURN_TEXT_P(cstring_to_text("xx"));
 }

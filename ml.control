@@ -1,5 +1,5 @@
 # ml extension
 comment = 'CatBoost Model'
-default_version = '0.2'
+default_version = '0.3'
 module_pathname = '$libdir/ml'
 relocatable = true
