@@ -31,7 +31,7 @@
 
 
 
-#define ML_VERSION "PgCatBoost 0.0.3"
+#define ML_VERSION "PgCatBoost 0.1"
 #define FIELDLEN 64
 
 typedef struct ArrayDatum {
@@ -52,9 +52,9 @@ PG_FUNCTION_INFO_V1(ml_test);
 PG_FUNCTION_INFO_V1(ml_info);
 
 static double sigmoid(double x);
-static char* getModelParms(ModelCalcerHandle* modelHandle);
-static char* getModelType(ModelCalcerHandle *modelHandle, char* info);
-static char*** getModelClasses(ModelCalcerHandle* modelHandle, char* info);
+static const char* getModelParms(ModelCalcerHandle* modelHandle);
+static char* getModelType(ModelCalcerHandle *modelHandle, const char* info);
+static char*** getModelClasses(ModelCalcerHandle* modelHandle, const char* info);
 static char** GetModelFeatures(ModelCalcerHandle *modelHandle, size_t *featureCount);
 
 static void CretatePredictTable(char* tablename, char* modelType);
@@ -100,15 +100,19 @@ static void
 CretatePredictTable(char* tablename, char* modelType)
 {
     StringInfoData buf;
-    initStringInfo(&buf);
     int res;
 
+    initStringInfo(&buf);
     appendStringInfo(&buf,
         "DROP TABLE IF EXISTS public.%s_predict;",
         tablename);
     
     res = SPI_execute(buf.data, false, 0);
-    // elog(WARNING,"%s res=%d", buf.data, res);
+    if(res != SPI_OK_UTILITY )
+    {
+        elog(ERROR,"error Query: %s", buf.data);
+    }
+
 
     resetStringInfo(&buf);
     appendStringInfo(&buf,
@@ -116,20 +120,30 @@ CretatePredictTable(char* tablename, char* modelType)
         tablename, tablename);
     
     res = SPI_execute(buf.data, false, 0);
-    // elog(WARNING,"%s res=%d", buf.data, res);
-    
+    if(res != SPI_OK_UTILITY )
+    {
+        elog(ERROR,"error Query: %s", buf.data);
+    }
+
     resetStringInfo(&buf);
     appendStringInfo(&buf,
         "ALTER TABLE IF EXISTS %s_predict SET SCHEMA public;",
         tablename);
-    
-    res = SPI_execute(buf.data, false, 0);
-    // elog(WARNING,"%s res=%d", buf.data, res);
-    resetStringInfo(&buf);
 
+    res = SPI_execute(buf.data, false, 0);
+    if(res != SPI_OK_UTILITY )
+    {
+        elog(ERROR,"error Query: %s", buf.data);
+    }
+
+    resetStringInfo(&buf);
     appendStringInfo(&buf,
         "ALTER TABLE IF EXISTS public.%s_predict ADD COLUMN predict FLOAT;",
         tablename);
+    if(res != SPI_OK_UTILITY )
+    {
+        elog(ERROR,"error Query: %s", buf.data);
+    }
 
     if(strcmp(modelType, "\"MultiClass\"") == 0)
         appendStringInfo(&buf,
@@ -137,6 +151,10 @@ CretatePredictTable(char* tablename, char* modelType)
         tablename);
 
     res = SPI_execute(buf.data, false, 0);
+    if(res != SPI_OK_UTILITY )
+    {
+        elog(ERROR,"error Query: %s", buf.data);
+    }
 
     resetStringInfo(&buf);
     pfree(buf.data);
@@ -211,9 +229,7 @@ checkInTextArray(char* name, ArrayDatum * featuresArr)
     for(i=0; i < featuresArr->count; i++)
     {
         char* fieldName = TextDatumGetCString(*p);
-        // elog(NOTICE, "[%d/%d] %s",i, featuresArr->count, fieldName );
 
-        // char* element = text_to_cstring((text*)featuresArr->elements[i]);
         if ( pstrcasecmp(fieldName, name) )
         {
             return true;            
@@ -253,7 +269,7 @@ pstrcasecmp(char  *s1, char  *s2)
                 pp2 = '_';
             else
                 pp2 = *p2;
-        
+
         if (pp1 == '_' && strcasecmp(p1+1,"id") == 0 && strcasecmp(p2,"ID") == 0)
             return true;
 
@@ -261,10 +277,12 @@ pstrcasecmp(char  *s1, char  *s2)
             return true;
 
         if (pp1!= pp2)
+        {
             return false;
+        }
         
-            p1 ++;
-            p2 ++;
+        p1 ++;
+        p2 ++;
     }
 
     if (*p1 !=*p2)
@@ -278,22 +296,26 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
 {
     StringInfoData buf;
     SPITupleTable *spi_tuptable;
-    HeapTuple   tuple;
     TupleDesc   spi_tupdesc;
     int i, j, res, rows;
     int cat_feature_counter = 0;
     int feature_counter = 0;
-    bool warning_flag = false;
     int *iscategory;
     int model_float_feature_count;
     int model_cat_feature_count ;
     int model_dimension;
-    int featureCount = 0;
+    size_t featureCount = 0;
     char **features;
+    float *row_fvalues;
+    int memsize;
+    char *cat_value_buffer;
+    char **row_cvalues;
+    double *result_pa;
+    double *result_exp;
+
+
     initStringInfo(&buf);
     appendStringInfo(&buf, "SELECT * FROM public.%s_predict", tabname);
-
-    elog(WARNING,"type:", modelType);
 
     res = SPI_exec(buf.data, 0);
     
@@ -328,21 +350,16 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
         
         if ( checkInTextArray(spi_tupdesc->attrs[i].attname.data, cat_fields) )
         {
-            // elog(NOTICE, "%s is categorial", spi_tupdesc->attrs[i].attname.data);
             cat_feature_counter ++;
             iscategory[i] = 1;
         }
         else
         {
-            // elog(NOTICE, "%s is float", spi_tupdesc->attrs[i].attname.data);
             feature_counter ++;
             iscategory[i] = 0;
         }
-        
-        // elog(WARNING, "field used %s", spi_tupdesc->attrs[i].attname.data);
-        
     }
-    
+
      //  check model features
     if (feature_counter != model_float_feature_count)
     {
@@ -362,13 +379,14 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
         );
     }
 
-    float *row_fvalues = palloc( model_float_feature_count * sizeof(float));
-    int memsize = model_cat_feature_count * sizeof(char) * FIELDLEN;
-    char *cat_value_buffer  = palloc(memsize);
-    char **row_cvalues = palloc(model_cat_feature_count * sizeof(char*));
+    row_fvalues = palloc( model_float_feature_count * sizeof(float));
+    memsize = model_cat_feature_count * sizeof(char) * FIELDLEN;
+    cat_value_buffer  = palloc(memsize);
+    row_cvalues = palloc(model_cat_feature_count * sizeof(char*));
 
-    double *result_pa  = (double*) palloc( sizeof(double) * model_dimension);
-    double *result_exp = (double*) palloc( sizeof(double) * model_dimension);
+
+    result_pa  = (double*) palloc( sizeof(double) * model_dimension);
+    result_exp = (double*) palloc( sizeof(double) * model_dimension);
 
 
     for (i = 0; i < rows; i++)
@@ -377,18 +395,17 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
         HeapTuple   spi_tuple;
         feature_counter = 0;
         cat_feature_counter = 0;
+
         spi_tuple = spi_tuptable->vals[i];
 
         resetStringInfo(&buf);
-        char *row = SPI_getvalue(spi_tuple, spi_tupdesc, 1);
 
         for(j=1; j < spi_tupdesc->natts-1; j++)
         {
-            char *value = SPI_getvalue(spi_tuple, spi_tupdesc, j+1);
-            char *name = spi_tupdesc->attrs[j].attname.data; 
+            char *value;
 
-            // elog(WARNING,"%s value[%d]='%s'",name,j,value);
-            
+            value = SPI_getvalue(spi_tuple, spi_tupdesc, j+1);
+
             if( iscategory[j] == 0)
             {
                 int res  = sscanf(value, "%f", &row_fvalues[feature_counter]);
@@ -407,7 +424,6 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
                 *p = '\0';
                 p++;
             }
-
         }   // column
 
 
@@ -430,6 +446,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
         if (strcmp(modelType, "\"MultiClass\"") == 0)
         {
 
+            char  ***p;
             double max = 0., sm = 0.;
             int max_i = -1;
 
@@ -450,11 +467,11 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
                 }
             }
 
-            char  ***p = modelClasses;
+            p = modelClasses;
 
             p += max_i;
 
-            appendStringInfo(&buf, "UPDATE %s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,*p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            appendStringInfo(&buf, "UPDATE %s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,**p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
 
         }
         else if (strcmp(modelType, "\"RMSE\"") == 0)
@@ -482,14 +499,16 @@ ml_cat_predict(PG_FUNCTION_ARGS)
 
     StringInfoData buf;
     ModelCalcerHandle* modelHandle;
-    int res,i;
     Datum      *key_datums;
     bool       *key_nulls;
     int         key_count;
     ArrayType  *key_array;
     ArrayDatum  cat_fields;
-    char*       model_info;
+    const char*       model_info;
     char*** modelClasses;
+    // char **featureName;
+    // int featureCount;
+    char* modelType;
 
     text *filename = PG_GETARG_TEXT_PP(0);
     char *tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
@@ -514,19 +533,15 @@ ml_cat_predict(PG_FUNCTION_ARGS)
 
     LoadModel(filename, &modelHandle);
 
-
-    int featureCount;
-    char **featureName = GetModelFeatures(modelHandle, &featureCount);
-
     SPI_connect();
     model_info = getModelParms(modelHandle);
     modelClasses= getModelClasses(modelHandle, model_info);
-    char* modelType = getModelType(modelHandle, model_info);
+    modelType = getModelType(modelHandle, model_info);
     CretatePredictTable(tabname, modelType);
 
     predict(modelHandle, tabname, &cat_fields, modelType, modelClasses);
 
-    // SPI_commit();
+
     if (SPI_finish() != SPI_OK_FINISH)
         elog(WARNING, "could not finish SPI");
 
@@ -546,22 +561,20 @@ ml_predict(PG_FUNCTION_ARGS)
 {
     StringInfoData buf;
     ModelCalcerHandle* modelHandle;
-    int res,i;
-    char* model_info;
+    const char* model_info;
     char*** modelClasses;
+    // char **featureName;
+    // size_t featureCount;
 
     text *filename = PG_GETARG_TEXT_PP(0);
     char *tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
+    char* modelType;
 
     LoadModel(filename, &modelHandle);
 
-
-    int featureCount;
-    char **featureName = GetModelFeatures(modelHandle, &featureCount);
-
     SPI_connect();
     model_info = getModelParms(modelHandle);
-    char* modelType = getModelType(modelHandle, model_info);
+    modelType = getModelType(modelHandle, model_info);
     CretatePredictTable(tabname, modelType);
     modelClasses = getModelClasses(modelHandle, model_info);
 
@@ -582,11 +595,14 @@ ml_predict(PG_FUNCTION_ARGS)
 }
 
 
-
 static char*
-getModelType(ModelCalcerHandle* modelHandle, char* info)
+getModelType(ModelCalcerHandle* modelHandle, const char* info)
 {
     StringInfoData buf;
+    TupleDesc tupdesc;
+    SPITupleTable *tuptable;
+    int ret;
+
     initStringInfo(&buf);
 
     if( !info )
@@ -597,11 +613,9 @@ getModelType(ModelCalcerHandle* modelHandle, char* info)
 
     appendStringInfo(&buf, "SELECT '%s'::jsonb #> '{loss_function,type}';", info);
 
-    SPITupleTable *tuptable = SPI_tuptable;
+    tuptable = SPI_tuptable;
 
-    // SPI_connect();
-
-    int ret = SPI_exec(buf.data, 0);
+    ret = SPI_exec(buf.data, 0);
     tuptable = SPI_tuptable;
 
     if (ret < 1 || tuptable == NULL)
@@ -609,19 +623,18 @@ getModelType(ModelCalcerHandle* modelHandle, char* info)
         elog(ERROR, "Query errorcode=%d", ret);
     }
 
-    TupleDesc tupdesc = tuptable->tupdesc;
+    tupdesc = tuptable->tupdesc;
 
     resetStringInfo(&buf);
     appendStringInfo(&buf, "%s", SPI_getvalue(tuptable->vals[0], tupdesc, 1));
 
-    // SPI_finish();
     return buf.data;
 }
 
 
-static char* getModelParms(ModelCalcerHandle* modelHandle)
+static const char* getModelParms(ModelCalcerHandle* modelHandle)
 {
-    char* info = GetModelInfoValue(modelHandle, "params", 6); // strlen("parms")
+    const char* info = GetModelInfoValue(modelHandle, "params", 6); // strlen("parms")
     if( !info )
     {
         return NULL;
@@ -630,24 +643,27 @@ static char* getModelParms(ModelCalcerHandle* modelHandle)
 }
 
 static char***
-getModelClasses(ModelCalcerHandle* modelHandle, char* info)
+getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
 {
     char ***res = NULL;
     StringInfoData buf;
-    initStringInfo(&buf);
+    Jsonb* j;
+    SPITupleTable *tuptable;
+    int ret;
+    bool is_null = false;
+    Datum classes;
+    TupleDesc tupdesc;
+
     if( !info )
     {
-        appendStringInfo(&buf, "NULL");
-        return buf.data;
+        return NULL;
     }
 
+    initStringInfo(&buf);
     appendStringInfo(&buf, "SELECT '%s'::jsonb #> '{data_processing_options,class_names}';", info);
 
-    SPITupleTable *tuptable = SPI_tuptable;
-
-    // SPI_connect();
-
-    int ret = SPI_exec(buf.data, 0);
+    tuptable = SPI_tuptable;
+    ret = SPI_exec(buf.data, 0);
     tuptable = SPI_tuptable;
 
     if (ret < 1 || tuptable == NULL)
@@ -655,30 +671,31 @@ getModelClasses(ModelCalcerHandle* modelHandle, char* info)
         elog(ERROR, "Query errorcode=%d", ret);
     }
 
-    TupleDesc tupdesc = tuptable->tupdesc;
+    tupdesc = tuptable->tupdesc;
 
     resetStringInfo(&buf);
     appendStringInfo(&buf, "%s", SPI_getvalue(tuptable->vals[0], tupdesc, 1));
 
-    bool is_null = false;
-    Datum classes = SPI_getbinval(tuptable->vals[0], tupdesc, 1,&is_null);
+    classes = SPI_getbinval(tuptable->vals[0], tupdesc, 1,&is_null);
 
     if (is_null){
-        elog(WARNING, "*********** res is NULL");
+        elog(WARNING, "result is NULL");
         return NULL;
     }
 
-    Jsonb* j = DatumGetJsonbP(classes);
+    j = DatumGetJsonbP(classes);
     
     if(JB_ROOT_IS_ARRAY(j))
     {
         JsonbIterator *it;
-        res = (char***) palloc( sizeof(char*) * (getJsonbLength( j,1) + 1));
-        char*** p = res;
-        it = JsonbIteratorInit(&j->root);
-
         JsonbIteratorToken type;
         JsonbValue  jb;
+        char*** p;
+
+        res = (char***) palloc( sizeof(char*) * (getJsonbLength((const JsonbContainer*) j,1) + 1));
+        p = res;
+
+        it = JsonbIteratorInit(&j->root);
 
         while ((type = JsonbIteratorNext(&it, &jb, false))
                != WJB_DONE)
@@ -686,29 +703,32 @@ getModelClasses(ModelCalcerHandle* modelHandle, char* info)
             if (WJB_ELEM == type){
                 if(jb.type == jbvString)
                 {
-                   *p = pnstrdup(jb.val.string.val, jb.val.string.len);
+                   *p = (char**)pnstrdup(jb.val.string.val, jb.val.string.len);
                    p++;
                 }
             }
         }
         *p = NULL;    
 
-    return res;
+        return res;
     }
 
-
-
-    return buf.data;
+    return NULL;
 }
+
+
 
 Datum
 ml_info(PG_FUNCTION_ARGS)
 {
     text *filename = PG_GETARG_TEXT_PP(0);
     StringInfoData buf;
-    int featureCount, i;
+    size_t featureCount;
+    int i;
     char * modelType;
-    char* model_info;
+    const char* model_info;
+    char *p;
+    char ** features;
 
     ModelCalcerHandle* modelHandle;
     LoadModel(filename, &modelHandle);
@@ -727,12 +747,12 @@ ml_info(PG_FUNCTION_ARGS)
 
     appendStringInfo(&buf," modelType %s\nfieldName:", modelType);
  
-    char **features = GetModelFeatures(modelHandle, &featureCount);
+    features = GetModelFeatures(modelHandle, &featureCount);
     for(i=0; i < featureCount; i++)
     {
         appendStringInfo(&buf,"%s,", features[i]);
     }
-    char *p = buf.data;
+    p = buf.data;
     *(p + buf.len -1 ) = ' ';
 
     ModelCalcerDelete(modelHandle);
@@ -746,48 +766,6 @@ ml_info(PG_FUNCTION_ARGS)
 Datum
 ml_test(PG_FUNCTION_ARGS)
 {
-    ArrayDatum  cat_fields;
-    Datum      *key_datums;
-    bool       *key_nulls;
-    int         key_count;
-    ArrayType  *key_array;
-    int i;
-    // key_array = PG_GETARG_ARRAYTYPE_P(0);
-
-    ModelCalcerHandle* modelHandle;
-    
-    LoadModel(cstring_to_text("titanic.cbm"), &modelHandle);
-
-
-    char* model_info = getModelParms(modelHandle);
-    char* modelType = getModelType(modelHandle, model_info);
-    // test(&cat_fields);
-
-    ModelCalcerDelete(modelHandle);
-
 
     PG_RETURN_TEXT_P(cstring_to_text("xx"));
 }
-
-        // switch (spi_tupdesc->attrs[i].atttypid)
-        // {
-        // case 18:        // char
-        // case 25:        // varchar            
-        // case 1043:      // text
-        //     cat_feature_counter ++;
-        //     iscategory[i] = 1;
-        //     break;
-        // case 20:        // int8
-        // case 21:        // int2
-        // case 23:        // int4
-        // case 700:       // float4
-        // case 701:       // float8
-        //     feature_counter ++;
-        //     iscategory[i] = 0;
-        //     break;
-        // default:
-        //     iscategory[i] = -1;
-        //     warning_flag = true;
-        // }
-        // // elog(WARNING, "%s %d", spi_tupdesc->attrs[i].attname.data, iscategory[i]);
-
