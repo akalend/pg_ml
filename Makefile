@@ -5,10 +5,10 @@ OBJS = \
 	$(WIN32RES) \
 	ml.o
 PG_CPPFLAGS = -I$(libpq_srcdir) -ggdb
-SHLIB_LINK_INTERNAL = $(libpq) -lcatboostmodel -lc -lm -pthread
+SHLIB_LINK_INTERNAL = $(libpq) -L.  -lcatboostmodel -lc -lm -pthread
 
 EXTENSION = ml
-DATA = ml--0.2.sql 
+DATA = ml--0.3.sql 
 PGFILEDESC = "ml - prediction data in ml model"
 
 REGRESS = ml
