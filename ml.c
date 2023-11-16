@@ -392,10 +392,8 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
     cat_value_buffer  = palloc(memsize);
     row_cvalues = palloc(model_cat_feature_count * sizeof(char*));
 
-
     result_pa  = (double*) palloc( sizeof(double) * model_dimension);
     result_exp = (double*) palloc( sizeof(double) * model_dimension);
-
 
 
     for (i = 0; i < rows; i++)
@@ -676,8 +674,10 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
 
     tupdesc = tuptable->tupdesc;
 
-    resetStringInfo(&buf);
-    appendStringInfo(&buf, "%s", SPI_getvalue(tuptable->vals[0], tupdesc, 1));
+    if (0 == strcmp(SPI_getvalue(tuptable->vals[0], tupdesc, 1), "[]"))
+    {
+        return NULL;
+    }
 
     classes = SPI_getbinval(tuptable->vals[0], tupdesc, 1,&is_null);
 
