@@ -4,7 +4,7 @@
  * Alexandre Kalendarev <akalend@mail.ru>
  * 
  *  SELECT ml_predict ('titanic.cbm', 'titanic','{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }');
- *
+ *  SELECT ml_predict ('adult.cbm',   'adult2','{workclass,education,marital_status, occupation,relationship,race,sex,native_country}');
  */
 #include <errno.h>
 #include <limits.h>
@@ -31,7 +31,7 @@
 
 
 
-#define ML_VERSION "PgCatBoost 0.1"
+#define ML_VERSION "PgCatBoost 0.0.3"
 #define FIELDLEN 64
 
 typedef struct ArrayDatum {
@@ -42,9 +42,6 @@ typedef struct ArrayDatum {
 
 PG_MODULE_MAGIC;
 
-/*
- * This is the trigger that protects us from orphaned large objects
- */
 PG_FUNCTION_INFO_V1(ml_version);
 PG_FUNCTION_INFO_V1(ml_predict);
 PG_FUNCTION_INFO_V1(ml_cat_predict);
@@ -140,20 +137,22 @@ CretatePredictTable(char* tablename, char* modelType)
     appendStringInfo(&buf,
         "ALTER TABLE IF EXISTS public.%s_predict ADD COLUMN predict FLOAT;",
         tablename);
+    res = SPI_execute(buf.data, false, 0);
     if(res != SPI_OK_UTILITY )
     {
         elog(ERROR,"error Query: %s", buf.data);
     }
 
-    if(strcmp(modelType, "\"MultiClass\"") == 0)
+    if(strcmp(modelType, "\"MultiClass\"") == 0) {
+        resetStringInfo(&buf);
         appendStringInfo(&buf,
         "ALTER TABLE IF EXISTS public.%s_predict ADD COLUMN class TEXT;",
         tablename);
-
-    res = SPI_execute(buf.data, false, 0);
-    if(res != SPI_OK_UTILITY )
-    {
-        elog(ERROR,"error Query: %s", buf.data);
+        res = SPI_execute(buf.data, false, 0);
+        if(res != SPI_OK_UTILITY )
+        {
+            elog(ERROR,"error Query: %s", buf.data);
+        }        
     }
 
     resetStringInfo(&buf);
@@ -204,8 +203,8 @@ checkInArray(char* name, char **features, int featureCount)
     int i;
     for(i=0; i < featureCount; i++)
     {
-        // elog(NOTICE, "%d %s/%s",i, features[i],name);
         if ( pstrcasecmp(features[i], name) ){
+            // elog(NOTICE, "%d %s/%s %d",i, features[i],name, featureCount);
             return true;            
         }
             
@@ -232,7 +231,8 @@ checkInTextArray(char* name, ArrayDatum * featuresArr)
 
         if ( pstrcasecmp(fieldName, name) )
         {
-            return true;            
+            // elog(WARNING, "%s Ok", fieldName);
+            return true;
         }
         p ++;
     }
@@ -312,6 +312,11 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
     char **row_cvalues;
     double *result_pa;
     double *result_exp;
+    bool isMultiClass = false;
+    int fieldCount = 0;
+
+    if (strcmp(modelType, "\"MultiClass\"") == 0)
+        isMultiClass = true;       
 
 
     initStringInfo(&buf);
@@ -336,14 +341,30 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
     model_cat_feature_count = (int)GetCatFeaturesCount(modelHandle);
     model_dimension = (int)GetDimensionsCount(modelHandle);
 
+
+    // char **p = *modelClasses;
+    // if (p == NULL) elog(ERROR, "p is NILL");
+
+    // elog(NOTICE, "******");
+    // for (i = 0; i < model_dimension; i++)
+    // {
+    //     if (p == NULL) elog(ERROR, "p is NILL");
+    //     char * nm = *p ? *p : "NULL";
+    //     elog(NOTICE, "%s", nm);
+    //     p++;
+    // } 
+    // elog(ERROR, "******");
+
+
     features = GetModelFeatures(modelHandle, &featureCount);
 
-    for(i=1; i < spi_tupdesc->natts-1; i++)
+    fieldCount = isMultiClass ? spi_tupdesc->natts -1 : spi_tupdesc->natts;
+
+    for(i=1; i < fieldCount; i++)
     {
         
         if(! checkInArray(spi_tupdesc->attrs[i].attname.data, features, featureCount))
         {
-            elog(WARNING, "field %s not used", spi_tupdesc->attrs[i].attname.data);
             iscategory[i] = -1;
             continue;
         } 
@@ -368,6 +389,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
             "count of numeric features is not valid, must be %d is %d",
             model_float_feature_count, feature_counter
         );
+        return;
     }
 
     if (cat_feature_counter != model_cat_feature_count)
@@ -377,6 +399,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
             "count of categocical features is not valid, must be %d is %d",
             model_cat_feature_count, cat_feature_counter
         );
+        return;
     }
 
     row_fvalues = palloc( model_float_feature_count * sizeof(float));
@@ -389,6 +412,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
     result_exp = (double*) palloc( sizeof(double) * model_dimension);
 
 
+
     for (i = 0; i < rows; i++)
     {
         char *p = (char*)cat_value_buffer;
@@ -398,9 +422,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
 
         spi_tuple = spi_tuptable->vals[i];
 
-        resetStringInfo(&buf);
-
-        for(j=1; j < spi_tupdesc->natts-1; j++)
+        for(j=1; j < fieldCount; j++)
         {
             char *value;
 
@@ -427,10 +449,9 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
         }   // column
 
 
-        if (!CalcModelPrediction(modelHandle, 
-                    1,
-                    (const float **) &row_fvalues, feature_counter,
-                    (const char***)&row_cvalues, cat_feature_counter,
+        if (!CalcModelPredictionSingle(modelHandle, 
+                    row_fvalues, feature_counter,
+                    (const char** )row_cvalues, cat_feature_counter,
                     result_pa, model_dimension)
             )
         {
@@ -443,14 +464,14 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
             elog( ERROR, "CalcModelPrediction error message: %s \nrow num=%d", GetErrorString(), i);
         }
 
-        if (strcmp(modelType, "\"MultiClass\"") == 0)
+        resetStringInfo(&buf);
+
+        if (isMultiClass)
         {
 
             char  ***p;
             double max = 0., sm = 0.;
             int max_i = -1;
-
-            // initStringInfo(&str);
 
             for( j = 0; j < model_dimension; j ++)
             {
@@ -460,7 +481,6 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
             for( j = 0; j < model_dimension; j ++)
             {
                 result_exp[j] = result_exp[j] / sm;
-                // appendStringInfo(&str, "%f/%f ", result_exp[j],result_pa[j]);
                 if (result_exp[j] > max){
                     max = result_exp[j];
                     max_i = j;
@@ -471,17 +491,18 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
 
             p += max_i;
 
-            appendStringInfo(&buf, "UPDATE %s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,**p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+
+            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,**p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
 
         }
         else if (strcmp(modelType, "\"RMSE\"") == 0)
         {
-            appendStringInfo(&buf, "UPDATE %s_predict SET predict=%f WHERE row=%s;", tabname, result_pa[0],SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f WHERE row=%s;", tabname, result_pa[0],SPI_getvalue(spi_tuple, spi_tupdesc, 1));
         }
         else
         {
             double probability = sigmoid(result_pa[0]);
-            appendStringInfo(&buf, "UPDATE %s_predict SET predict=%f WHERE row=%s;", tabname, probability,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f WHERE row=%s;", tabname, probability,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
         }
 
         SPI_execute(buf.data, false, 0);
