@@ -6,6 +6,14 @@ docs - documentation and slides
 
 learn - learn notebooks
 
+data - dumps of datasets
+```
+	-rw-rw-r-- 207344 ноя 16 20:36 adult.dmp.gz
+	-rw-rw-r--  17687 ноя 16 20:37 astra.dmp.gz
+	-rw-rw-r--  13578 ноя 16 22:43 boston.dmp.gz
+	-rw-rw-r--  12903 ноя 16 20:34 titanic.dmp.gz
+```
+
 ## Prediction
 
 The prediction has so far been made  for:
