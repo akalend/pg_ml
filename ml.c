@@ -89,8 +89,7 @@ DropPredictTable(char* tablename)
         tablename);
     
     SPI_execute(buf.data, false, 0);
-    // elog(WARNING,"%s res=%d", buf.data, res);
-
+    pfree(buf.data);
 }
 
 static void 
@@ -342,20 +341,6 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
     model_dimension = (int)GetDimensionsCount(modelHandle);
 
 
-    // char **p = *modelClasses;
-    // if (p == NULL) elog(ERROR, "p is NILL");
-
-    // elog(NOTICE, "******");
-    // for (i = 0; i < model_dimension; i++)
-    // {
-    //     if (p == NULL) elog(ERROR, "p is NILL");
-    //     char * nm = *p ? *p : "NULL";
-    //     elog(NOTICE, "%s", nm);
-    //     p++;
-    // } 
-    // elog(ERROR, "******");
-
-
     features = GetModelFeatures(modelHandle, &featureCount);
 
     fieldCount = isMultiClass ? spi_tupdesc->natts -1 : spi_tupdesc->natts;
@@ -487,12 +472,9 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
                 }
             }
 
-            p = modelClasses;
+            p = modelClasses + max_i;
 
-            p += max_i;
-
-
-            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,**p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,(char*)*p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
 
         }
         else if (strcmp(modelType, "\"RMSE\"") == 0)
@@ -715,7 +697,6 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
 
         res = (char***) palloc( sizeof(char*) * (getJsonbLength((const JsonbContainer*) j,1) + 1));
         p = res;
-
         it = JsonbIteratorInit(&j->root);
 
         while ((type = JsonbIteratorNext(&it, &jb, false))
@@ -724,7 +705,7 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
             if (WJB_ELEM == type){
                 if(jb.type == jbvString)
                 {
-                   *p = (char**)pnstrdup(jb.val.string.val, jb.val.string.len);
+                  *p = (char**)pnstrdup(jb.val.string.val, jb.val.string.len);
                    p++;
                 }
             }
