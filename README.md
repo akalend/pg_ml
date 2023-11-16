@@ -4,7 +4,7 @@ in development, don't stable
 ## folders
 docs - documentation and slides
 
-learn - learn notebooks
+learn - train model notebooks
 
 data - dumps of datasets
 ```
