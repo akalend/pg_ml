@@ -23,6 +23,7 @@
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/varlena.h"
+#include "utils/numeric.h"
 
 //#include "common/jsonapi.h"
 #include "utils/json.h"
@@ -40,14 +41,6 @@ typedef struct ArrayDatum {
 } ArrayDatum;
 
 
-PG_MODULE_MAGIC;
-
-PG_FUNCTION_INFO_V1(ml_version);
-PG_FUNCTION_INFO_V1(ml_predict);
-PG_FUNCTION_INFO_V1(ml_cat_predict);
-PG_FUNCTION_INFO_V1(ml_test);
-PG_FUNCTION_INFO_V1(ml_info);
-
 static double sigmoid(double x);
 static const char* getModelParms(ModelCalcerHandle* modelHandle);
 static char* getModelType(ModelCalcerHandle *modelHandle, const char* info);
@@ -64,6 +57,13 @@ static bool pstrcasecmp(char *s1, char *s2);
 static void predict(ModelCalcerHandle  *modelHandle, char  *tabname, ArrayDatum *cat_fields, char* modelType, char*** modelClasses);
 
 
+PG_MODULE_MAGIC;
+
+PG_FUNCTION_INFO_V1(ml_version);
+PG_FUNCTION_INFO_V1(ml_predict);
+PG_FUNCTION_INFO_V1(ml_cat_predict);
+PG_FUNCTION_INFO_V1(ml_test);
+PG_FUNCTION_INFO_V1(ml_info);
 
 static double
 sigmoid(double x) {
@@ -142,7 +142,7 @@ CretatePredictTable(char* tablename, char* modelType)
         elog(ERROR,"error Query: %s", buf.data);
     }
 
-    if(strcmp(modelType, "\"MultiClass\"") == 0) {
+    if(strcmp(modelType, "\"RMSE\"") != 0) {
         resetStringInfo(&buf);
         appendStringInfo(&buf,
         "ALTER TABLE IF EXISTS public.%s_predict ADD COLUMN class TEXT;",
@@ -218,7 +218,6 @@ checkInTextArray(char* name, ArrayDatum * featuresArr)
     int i;
     Datum* p;
     if (featuresArr == NULL){
-        // elog(WARNING, "feature array is null");
         return false;
     }
 
@@ -230,7 +229,6 @@ checkInTextArray(char* name, ArrayDatum * featuresArr)
 
         if ( pstrcasecmp(fieldName, name) )
         {
-            // elog(WARNING, "%s Ok", fieldName);
             return true;
         }
         p ++;
@@ -482,7 +480,16 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
         else
         {
             double probability = sigmoid(result_pa[0]);
-            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f WHERE row=%s;", tabname, probability,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            int n = 0;
+
+            if (probability > 0.5)
+            {
+                n = 1;
+            }
+
+
+            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f, class='%s' WHERE row=%s;",
+             tabname, probability,(char*)*( modelClasses + n),SPI_getvalue(spi_tuple, spi_tupdesc, 1));
         }
 
         SPI_execute(buf.data, false, 0);
@@ -643,6 +650,7 @@ static const char* getModelParms(ModelCalcerHandle* modelHandle)
     return info;
 }
 
+
 static char***
 getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
 {
@@ -708,9 +716,18 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
                   *p = (char**)pnstrdup(jb.val.string.val, jb.val.string.len);
                    p++;
                 }
+                if(jb.type == jbvNumeric)
+                {
+                    Numeric num;
+                    num = jb.val.numeric;
+
+                    *p = (char**)pstrdup(DatumGetCString(DirectFunctionCall1(numeric_out,
+                                              NumericGetDatum(num))));
+                    p++;
+                }
             }
         }
-        *p = NULL;    
+        *p = NULL;
 
         return res;
     }
@@ -762,7 +779,6 @@ ml_info(PG_FUNCTION_ARGS)
 
     PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
-
 
 
 Datum
