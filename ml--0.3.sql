@@ -27,6 +27,11 @@ RETURNS text
 AS 'MODULE_PATHNAME','ml_info'
 LANGUAGE C STRICT PARALLEL RESTRICTED;
 
+CREATE FUNCTION ml_json_feature_info(model text )
+RETURNS text
+AS 'MODULE_PATHNAME','ml_json_parms_info'
+LANGUAGE C STRICT PARALLEL RESTRICTED;
+
 
 CREATE FUNCTION ml_test(model text[] )
 RETURNS text

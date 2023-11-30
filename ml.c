@@ -3,8 +3,12 @@
  *
  * Alexandre Kalendarev <akalend@mail.ru>
  * 
+ *
+ *  test this code:
  *  SELECT ml_predict ('titanic.cbm', 'titanic','{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }');
  *  SELECT ml_predict ('adult.cbm',   'adult2','{workclass,education,marital_status, occupation,relationship,race,sex,native_country}');
+ *  select  json_array_elements((j #> '{features_info,float_features}')::json) #> '{feature_id}'     from parms  WHERE name='astra_all';
+
  */
 #include <errno.h>
 #include <limits.h>
@@ -20,25 +24,27 @@
 #include "funcapi.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
-#include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/varlena.h"
 #include "utils/numeric.h"
 
-//#include "common/jsonapi.h"
 #include "utils/json.h"
 #include "utils/jsonb.h"
 #include "utils/jsonfuncs.h"
 
 
 
-#define ML_VERSION "PgCatBoost 0.0.3"
+#define ML_VERSION "PgCatBoost 0.0.4"
 #define FIELDLEN 64
+#define PAGESIZE 8192
+
 
 typedef struct ArrayDatum {
     int count;
     Datum *elements; 
 } ArrayDatum;
+
+static MemoryContext ml_context;
 
 
 static double sigmoid(double x);
@@ -54,7 +60,10 @@ static void LoadModel(text  *filename, ModelCalcerHandle **model);
 static bool checkInArray(char *name, char **features, int featureCount);
 static bool checkInTextArray(char *name, ArrayDatum *featureArray);
 static bool pstrcasecmp(char *s1, char *s2);
-static void predict(ModelCalcerHandle  *modelHandle, char  *tabname, ArrayDatum *cat_fields, char* modelType, char*** modelClasses);
+static void predict(ModelCalcerHandle  *modelHandle, char  *tabname,
+                    ArrayDatum *cat_fields, char* modelType,
+                    char*** modelClasses);
+void _PG_init(void);
 
 
 PG_MODULE_MAGIC;
@@ -64,6 +73,7 @@ PG_FUNCTION_INFO_V1(ml_predict);
 PG_FUNCTION_INFO_V1(ml_cat_predict);
 PG_FUNCTION_INFO_V1(ml_test);
 PG_FUNCTION_INFO_V1(ml_info);
+PG_FUNCTION_INFO_V1(ml_json_parms_info);
 
 static double
 sigmoid(double x) {
@@ -112,7 +122,8 @@ CretatePredictTable(char* tablename, char* modelType)
 
     resetStringInfo(&buf);
     appendStringInfo(&buf,
-        "CREATE TABLE IF NOT EXISTS public.%s_predict AS SELECT row_number() over() as row,* FROM %s;",
+        "CREATE TABLE IF NOT EXISTS public.%s_predict "
+        "AS SELECT row_number() over() as row,* FROM %s;",
         tablename, tablename);
     
     res = SPI_execute(buf.data, false, 0);
@@ -289,7 +300,8 @@ pstrcasecmp(char  *s1, char  *s2)
 }
 
 static void
-predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, char *modelType, char ***modelClasses)
+predict(ModelCalcerHandle* modelHandle, char* tabname,
+        ArrayDatum* cat_fields, char *modelType, char ***modelClasses)
 {
     StringInfoData buf;
     SPITupleTable *spi_tuptable;
@@ -346,7 +358,8 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
     for(i=1; i < fieldCount; i++)
     {
         
-        if(! checkInArray(spi_tupdesc->attrs[i].attname.data, features, featureCount))
+        if(! checkInArray(spi_tupdesc->attrs[i].attname.data,
+                          features, featureCount))
         {
             iscategory[i] = -1;
             continue;
@@ -442,7 +455,8 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
             {
                 appendStringInfo(&str, "%f,", row_fvalues[j]);
             }
-            elog( ERROR, "CalcModelPrediction error message: %s \nrow num=%d", GetErrorString(), i);
+            elog( ERROR, "CalcModelPrediction error message: %s \nrow num=%d",
+                    GetErrorString(), i);
         }
 
         resetStringInfo(&buf);
@@ -470,12 +484,19 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
 
             p = modelClasses + max_i;
 
-            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f,class='%s' WHERE row=%s;", tabname, max ,(char*)*p ,SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            appendStringInfo(&buf, "UPDATE public.%s_predict "
+                                   "SET predict=%f,class='%s' "
+                                   "WHERE row=%s;"
+                                   , tabname, max ,(char*)*p ,
+                                   SPI_getvalue(spi_tuple, spi_tupdesc, 1));
 
         }
         else if (strcmp(modelType, "\"RMSE\"") == 0)
         {
-            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f WHERE row=%s;", tabname, result_pa[0],SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f "
+                "WHERE row=%s;",
+                tabname, result_pa[0],
+                SPI_getvalue(spi_tuple, spi_tupdesc, 1));
         }
         else
         {
@@ -488,8 +509,11 @@ predict(ModelCalcerHandle* modelHandle, char* tabname, ArrayDatum* cat_fields, c
             }
 
 
-            appendStringInfo(&buf, "UPDATE public.%s_predict SET predict=%f, class='%s' WHERE row=%s;",
-             tabname, probability,(char*)*( modelClasses + n),SPI_getvalue(spi_tuple, spi_tupdesc, 1));
+            appendStringInfo(&buf,
+                "UPDATE public.%s_predict "
+                "SET predict=%f, class='%s' WHERE row=%s;",
+                tabname, probability,(char*)*( modelClasses + n),
+                SPI_getvalue(spi_tuple, spi_tupdesc, 1));
         }
 
         SPI_execute(buf.data, false, 0);
@@ -580,8 +604,8 @@ ml_predict(PG_FUNCTION_ARGS)
 
     LoadModel(filename, &modelHandle);
 
-    SPI_connect();
     model_info = getModelParms(modelHandle);
+    SPI_connect();
     modelType = getModelType(modelHandle, model_info);
     CretatePredictTable(tabname, modelType);
     modelClasses = getModelClasses(modelHandle, model_info);
@@ -619,10 +643,10 @@ getModelType(ModelCalcerHandle* modelHandle, const char* info)
         return buf.data;
     }
 
-    appendStringInfo(&buf, "SELECT '%s'::jsonb #> '{loss_function,type}';", info);
+    appendStringInfo(&buf,
+        "SELECT '%s'::jsonb #> '{loss_function,type}';", info);
 
     tuptable = SPI_tuptable;
-
     ret = SPI_exec(buf.data, 0);
     tuptable = SPI_tuptable;
 
@@ -669,12 +693,13 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
     }
 
     initStringInfo(&buf);
-    appendStringInfo(&buf, "SELECT '%s'::jsonb #> '{data_processing_options,class_names}';", info);
+    appendStringInfo(&buf,
+        "SELECT '%s'::jsonb #> '{data_processing_options,class_names}';",
+        info);
 
     tuptable = SPI_tuptable;
     ret = SPI_exec(buf.data, 0);
     tuptable = SPI_tuptable;
-
     if (ret < 1 || tuptable == NULL)
     {
         elog(ERROR, "Query errorcode=%d", ret);
@@ -703,7 +728,10 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
         JsonbValue  jb;
         char*** p;
 
-        res = (char***) palloc( sizeof(char*) * (getJsonbLength((const JsonbContainer*) j,1) + 1));
+        res = (char***) palloc( sizeof(char*) * (
+                getJsonbLength((const JsonbContainer*) j,1) + 1)
+              );
+
         p = res;
         it = JsonbIteratorInit(&j->root);
 
@@ -721,7 +749,8 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
                     Numeric num;
                     num = jb.val.numeric;
 
-                    *p = (char**)pstrdup(DatumGetCString(DirectFunctionCall1(numeric_out,
+                    *p = (char**)pstrdup(DatumGetCString(
+                                            DirectFunctionCall1(numeric_out,
                                               NumericGetDatum(num))));
                     p++;
                 }
@@ -754,13 +783,15 @@ ml_info(PG_FUNCTION_ARGS)
 
     initStringInfo(&buf);
 
-    appendStringInfo(&buf, "dimension:%ld numeric features:%ld categorial features:%ld",
-            GetDimensionsCount(modelHandle),
-            GetFloatFeaturesCount(modelHandle),
-            GetCatFeaturesCount(modelHandle));
+    appendStringInfo(&buf,
+        "dimension:%ld numeric features:%ld categorial features:%ld",
+        GetDimensionsCount(modelHandle),
+        GetFloatFeaturesCount(modelHandle),
+        GetCatFeaturesCount(modelHandle));
+
+    model_info = getModelParms(modelHandle);
 
     SPI_connect();
-    model_info = getModelParms(modelHandle);
     modelType = getModelType(modelHandle, model_info);
     SPI_finish();
 
@@ -782,8 +813,197 @@ ml_info(PG_FUNCTION_ARGS)
 
 
 Datum
+ml_json_parms_info(PG_FUNCTION_ARGS)
+{
+    MemoryContext oldcontext;
+    FILE *model = NULL;
+    struct stat stat_info;
+    char *buf = NULL;
+    size_t readed = 0;
+    size_t count_bytes = 0;
+    char  *filename_str, *p;
+    int   err;
+    StringInfoData query;
+    StringInfoData out;
+    TupleDesc tupdesc;
+    SPITupleTable *tuptable;
+    int ret, i;
+    text *filename;
+
+
+    oldcontext = MemoryContextSwitchTo(ml_context);
+
+    filename = PG_GETARG_TEXT_PP(0);
+
+    filename_str = text_to_cstring(filename);
+
+    if (stat(filename_str, &stat_info) == -1)
+    {
+        err = errno;
+        elog(ERROR, "file %s has error: %d:%s",filename_str, err, strerror(err));
+    }
+
+    if (stat_info.st_size < 16)
+    {
+        elog(ERROR, "file %s has very small size: %ld",filename_str,
+            stat_info.st_size);
+    }
+
+    model = fopen(filename_str, PG_BINARY_R);
+    if (model == NULL){
+        err = errno;
+        elog(ERROR, "Cannot open model file \"%s\": %s",
+             filename_str, strerror(err));
+    }
+
+    buf = (char*)palloc0(stat_info.st_size+1);
+
+    p = buf;
+    while (!feof(model)){
+        readed = fread(p, 1, PAGESIZE, model);
+        p += readed;
+        count_bytes += readed;
+    }
+
+    fclose(model);
+    if (count_bytes != stat_info.st_size)
+    {
+        err = errno;
+        elog(ERROR, "error readed len=%ld/%ld from file \n%s", readed,
+            stat_info.st_size,strerror(err));
+    }
+
+
+    initStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,float_features}')::json)"
+        " #>> '{feature_id}'", buf);
+
+    tuptable = SPI_tuptable;
+    SPI_connect();
+
+    ret = SPI_exec(query.data, 0);
+    tuptable = SPI_tuptable;
+
+    if (ret < 1 || tuptable == NULL)
+    {
+        elog(ERROR, "Query errorcode=%d", ret);
+    }
+
+    elog(NOTICE,"rows=%ld", SPI_processed);
+
+    tuptable = SPI_tuptable;
+    if (tuptable == NULL)
+        elog(ERROR,"tuptable is null");
+
+    initStringInfo(&out);
+    if (SPI_processed > 0)
+    {
+        tupdesc = tuptable->tupdesc;
+
+        appendStringInfo(&out,"float feature:");
+        for (i = 0; i < SPI_processed; i++)
+        {
+            appendStringInfo(&out, "%s,", SPI_getvalue(tuptable->vals[i], tupdesc, 1));
+        }
+        p = p + out.len - 1;
+        *p = '\n';   // SigFall
+    }
+    else
+    {
+        appendStringInfo(&out,"none float feature\n");
+    }
+
+
+    resetStringInfo(&query);
+    appendStringInfo(&query,
+        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,categorical_features}')::json)"
+        " #>> '{feature_id}'", buf);
+
+
+    tuptable = SPI_tuptable;
+
+    ret = SPI_exec(query.data, 0);
+    tuptable = SPI_tuptable;
+
+    if (ret < 1 || tuptable == NULL)
+    {
+        elog(ERROR, "Query errorcode=%d", ret);
+    }
+
+    elog(NOTICE,"rows=%ld", SPI_processed);
+    tuptable = SPI_tuptable;
+    if (tuptable == NULL)
+        elog(ERROR,"tuptable is null");
+
+    tupdesc = tuptable->tupdesc;
+
+    appendStringInfo(&out,"\ncategorial feature:");
+    for (i = 0; i < SPI_processed; i++)
+    {
+        appendStringInfo(&out, "%s,", SPI_getvalue(tuptable->vals[i], tupdesc, 1));
+    }
+    *(p + out.len - 1) = '\n';
+
+    SPI_finish();
+
+    pfree(buf);
+    pfree(query.data);
+
+    /* Reset our memory context and switch back to the original one */
+    MemoryContextSwitchTo(oldcontext);
+    MemoryContextReset(ml_context);
+
+    PG_RETURN_TEXT_P(cstring_to_text(out.data));
+}
+
+
+static void
+reset_callback(void* arg)
+{
+    elog(NOTICE, "reset_callback() called with arg = %s", (char*)arg);
+}
+
+
+Datum
 ml_test(PG_FUNCTION_ARGS)
 {
+    // MemoryContextCallback* cb;
+    // Size buffsize, totalsize;
+
+    // MemoryContext myctx = AllocSetContextCreate(CurrentMemoryContext, "MemCtx", ALLOCSET_DEFAULT_SIZES);
+    // MemoryContext oldctx = MemoryContextSwitchTo(myctx);
+
+    // cb = (MemoryContextCallback*)palloc(sizeof(MemoryContextCallback));
+    // cb->func = reset_callback;
+    // cb->arg = pstrdup("memctx");
+    // MemoryContextRegisterResetCallback(myctx, cb);
+
+    // buffsize = GetMemoryChunkSpace(cb);
+    // totalsize = MemoryContextMemAllocated(myctx, true /* recursive */);
+    // elog(NOTICE, "Memory allocated for cb: %lld, sizeof(*cb) = %lld", (long long)buffsize, (long long)sizeof(*cb));
+    // elog(NOTICE, "Total memory allocated: %lld", (long long)totalsize);
+
+    // MemoryContextSwitchTo(oldctx);
+
+    // elog(NOTICE, "Calling MemoryContextDelete()...");
+    // MemoryContextDelete(myctx);
+    // elog(NOTICE, "Returning from experiment_memctx() ...");
+
 
     PG_RETURN_TEXT_P(cstring_to_text("xx"));
+}
+
+/*
+ * _PG_init
+ *
+ * Defines the module's GUC.
+ */
+void
+_PG_init(void)
+{
+
+    ml_context = AllocSetContextCreate(TopMemoryContext,
+                                       "ml",
+                                       ALLOCSET_DEFAULT_SIZES);
 }
