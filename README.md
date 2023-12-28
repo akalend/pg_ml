@@ -119,7 +119,10 @@ SELECT * from  ml_cat_predict('boston.cbm', 'boston2') LIMIT 3;
        2 |  33.67737911788664 | 
 (3 rows)
 
-WITH  predict  AS (  SELECT * from ml_cat_predict('astra3.cbm', 'astra'))  SELECT * FROM astra a LEFT JOIN predict p ON (p.row_num = a.row)   ;
+--- You can join dataset with other tables
+WITH  predict  AS (  SELECT * from ml_cat_predict('astra3.cbm', 'astra'))
+    SELECT * FROM astra a 
+       LEFT JOIN predict p ON (p.row_num = a.row)   ;
  row |       alpha       |       delta        |    u     |    g     |    r     |    i     |    z     | run_id | cam_col | field_id |      spec_obj_id       |   redshift    | plate |  mjd  | fiber_id | row_num |      predict       | class  
 -----+-------------------+--------------------+----------+----------+----------+----------+----------+--------+---------+----------+------------------------+---------------+-------+-------+----------+---------+--------------------+--------
    0 |  16.9568897845004 |   3.64613008870454 | 23.33542 | 21.95143 | 20.48149 |   19.603 | 19.13094 |   7712 |       6 |      442 |  4.855016555329904e+18 |     0.5062369 |  4312 | 55511 |      495 |       0 | 0.9868595777513302 | GALAXY
