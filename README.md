@@ -70,11 +70,13 @@ SELECT ml_predict('titanic.cbt', 'titanic', '{name,passenger_id,pclass,sex,sibsp
 select ml_predict('adult.cbm','adult2', 'workclass,education,marital-status,occupation,relationship,race,sex,native_country}');
 
 -- multi classification https://www.kaggle.com/code/satoru90/stellar-classification-dataset-sdss17/
-SELECT ml_predict('astra3.cbt', 'astra');
+SELECT ml_predict_table('astra3.cbt', 'astra');
 
 --- regression   https://www.kaggle.com/c/boston-housing
-SELECT ml_predict('boston.cbt', 'boston');
+SELECT ml_predict_table('boston.cbt', 'boston');
 
+--- the dataset of the prediction
+SELECT ml_predict('boston.cbt', 'boston');
 ```
 
 ## Before compilation
