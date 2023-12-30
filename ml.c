@@ -938,9 +938,9 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
         else if (strcmp(model->modelType, "\"RMSE\"") == 0)
         {
 
-            recordDatum = PredictGetDatum(model->keyField, model->current, model->result_pa[0], NULL,
-                            functionContext->tuple_desc);
-
+            recordDatum = PredictGetDatum(model->keyField, model->current,
+                                          model->result_pa[0], NULL,
+                                          functionContext->tuple_desc);
         }
         else if (strncmp("\"Logloss\"", model->modelType, 9) == 0)
         {
@@ -956,7 +956,7 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
             {
                 out = key_field_value;
             }
-            recordDatum = PredictGetDatum(out, model->current, model->result_pa[0],
+            recordDatum = PredictGetDatum(out, model->current, probability,
                             (char*)*(model->modelClasses + n),
                             functionContext->tuple_desc);
 
@@ -974,8 +974,9 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
                 class=no;
             }
 
-            recordDatum = PredictGetDatum(model->keyField, model->current, probability, class,
-                            functionContext->tuple_desc);
+            recordDatum = PredictGetDatum(model->keyField, model->current,
+                                          probability, class,
+                                          functionContext->tuple_desc);
 
         }
 
