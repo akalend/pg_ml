@@ -25,7 +25,8 @@ CREATE OR REPLACE FUNCTION ml_predict(
     model text,
     tablename text,
     categoirial_futures text[] default '{}', 
-    OUT row_num bigint,
+    join_field text DEFAULT 'row',
+    OUT index text,
     OUT predict float,
     OUT class text
 ) RETURNS setof RECORD
