@@ -35,7 +35,7 @@
 
 
 
-#define ML_VERSION "PgCatBoost 0.4.0"
+#define ML_VERSION "PgCatBoost 0.4.1"
 #define FIELDLEN    64
 #define PAGESIZE    8192
 #define QNaN        0x7fffffff
@@ -73,7 +73,8 @@ typedef struct MLmodelData
 #define MLmodel MLmodelData*
 
 static MemoryContext ml_context;
-
+static char* model_path = "";
+ 
 static double sigmoid(double x);
 static const char* getModelParms(ModelCalcerHandle* modelHandle);
 static char* getModelType(ModelCalcerHandle *modelHandle, const char* info);
@@ -92,6 +93,7 @@ static void predict(ModelCalcerHandle  *modelHandle, char  *tabname,
                     char*** modelClasses);
 static Datum PredictGetDatum(char* id, int64 row_no, float8 predict, char* className,
                     TupleDesc tupleDescriptor);
+static bool check_model_path(char **newval, void **extra, GucSource source);
 
 void _PG_init(void);
 
@@ -209,7 +211,24 @@ static void
 LoadModel(text  *filename, ModelCalcerHandle** modelHandle)
 {
     struct stat buf;
-    char  *filename_str = text_to_cstring(filename);
+    StringInfoData sbuf;
+    char slash[2] = "/\0";
+
+    const char  *filename_str = text_to_cstring(filename);
+
+    initStringInfo(&sbuf);
+    if (strstr(filename_str, slash) == NULL)
+    {
+        int len = strlen( model_path);
+        if (model_path[len-1] == '/')
+            appendStringInfo(&sbuf, "%s%s", model_path, filename_str);
+        else
+            appendStringInfo(&sbuf, "%s/%s", model_path, filename_str);
+
+        filename_str = sbuf.data;
+    }
+
+
     if (stat(filename_str, &buf) == -1)
     {
         int         err = errno;
@@ -220,6 +239,8 @@ LoadModel(text  *filename, ModelCalcerHandle** modelHandle)
     if (!LoadFullModelFromFile(*modelHandle, filename_str)) {
         elog(ERROR, "LoadFullModelFromFile error message: %s\n", GetErrorString());
     }
+    resetStringInfo(&sbuf);
+    pfree(sbuf.data);
 }
 
 /*
@@ -1391,6 +1412,48 @@ ml_test(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Check existing model folder
+ *
+ */
+static bool
+check_model_path(char **newval, void **extra, GucSource source)
+{
+    struct stat st;
+
+    /*
+     * The default value is an empty string, so we have to accept that value.
+     * Our check_configured callback also checks for this and prevents
+     * archiving from proceeding if it is still empty.
+     */
+    if (*newval == NULL || *newval[0] == '\0')
+        return true;
+
+    /*
+     * Make sure the file paths won't be too long.  The docs indicate that the
+     * file names to be archived can be up to 64 characters long.
+     */
+    if (strlen(*newval) + 64 + 2 >= MAXPGPATH)
+    {
+        GUC_check_errdetail("directory too long.");
+        return false;
+    }
+
+    /*
+     * Do a basic sanity check that the specified archive directory exists. It
+     * could be removed at some point in the future, so we still need to be
+     * prepared for it not to exist in the actual archiving logic.
+     */
+    if (stat(*newval, &st) != 0 || !S_ISDIR(st.st_mode))
+    {
+        GUC_check_errdetail("Specified  directory does not exist.");
+        return false;
+    }
+
+    return true;
+}
+
+
+/*
  * _PG_init
  *
  * Defines the module's GUC.
@@ -1398,6 +1461,17 @@ ml_test(PG_FUNCTION_ARGS)
 void
 _PG_init(void)
 {
+
+    DefineCustomStringVariable("ml.model_path",
+                               "Path to model folder",
+                               NULL,
+                               &model_path,
+                               "",
+                               PGC_SIGHUP,
+                               0,
+                               check_model_path, NULL, NULL);
+
+    MarkGUCPrefixReserved("ml");
 
     ml_context = AllocSetContextCreate(TopMemoryContext,
                                        "ml",

@@ -48,6 +48,28 @@ The prediction has so far been made  for:
 - [optional] cp model.cbm $PG_HOME/data
 
 
+## Configuration
+
+Youneed to create a directory and assign permissions for postgress process.
+Add to configuration file: postgresql.conf
+```js
+
+ml.model_path='/usr/local/pgsql/model'   # any path to model directory
+
+```
+
+Check path variable:
+```sql
+SET   ml.model_path TO '/usr/local/pgsql/model';
+
+-- show variable
+# SHOW ml.model_path;
+     ml.model_path      
+------------------------
+ /usr/local/pgsql/model
+(1 row)
+
+```
 ## examples
 
 Titanic prediction model from CatBoost is 'titanic.cbt'.
