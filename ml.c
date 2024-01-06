@@ -207,7 +207,7 @@ CretatePredictTable(char* tablename, char* modelType)
 /*
 * check filename and load CatBosot model
 */
-static void 
+static void
 LoadModel(text  *filename, ModelCalcerHandle** modelHandle)
 {
     struct stat buf;
@@ -242,6 +242,7 @@ LoadModel(text  *filename, ModelCalcerHandle** modelHandle)
     resetStringInfo(&sbuf);
     pfree(sbuf.data);
 }
+
 
 /*
 *  get array names Model features
@@ -653,8 +654,6 @@ ml_predict(PG_FUNCTION_ARGS)
     ModelCalcerHandle* modelHandle;
     const char* model_info;
     char*** modelClasses;
-    // char **featureName;
-    // size_t featureCount;
 
     text *filename = PG_GETARG_TEXT_PP(0);
     char *tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
@@ -670,8 +669,6 @@ ml_predict(PG_FUNCTION_ARGS)
 
     predict(modelHandle, tabname, NULL, modelType, modelClasses);
 
-
-    // SPI_commit();
     if (SPI_finish() != SPI_OK_FINISH)
         elog(WARNING, "could not finish SPI");
 
@@ -701,13 +698,13 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
         const char*     model_info;
         const int resultColumnCount = 3;
         int             model_float_feature_count;
-        int             model_cat_feature_count ;
+        int             model_cat_feature_count;
         int             model_dimension;
         int             res;
         size_t          featureCount = 0;
         char            **features;
-        int             cat_feature_counter=0;
-        int             feature_counter=0;
+        int             cat_feature_counter = 0;
+        int             feature_counter = 0;
         int             i;
         MLmodel         model;
         text            *filename;
@@ -718,6 +715,7 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
         functionContext = SRF_FIRSTCALL_INIT();
 
         filename = PG_GETARG_TEXT_PP(0);
+
         tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
 
         LoadModel(filename, &modelHandle);
@@ -730,6 +728,7 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
 
         if (!PG_ARGISNULL(2))
         {
+
             int         key_count;
             Datum      *key_datums;
             bool       *key_nulls;
@@ -827,7 +826,6 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
         model->cat_count = cat_feature_counter;
         model->num_count = feature_counter;
 
-
         /*
          * This tuple descriptor must match the output parameters declared for
          * the function in pg_proc.
@@ -865,7 +863,6 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
 
         model->row_fvalues = palloc0( model->num_count * sizeof(float));
         p = model->cat_value_buffer  = palloc0(memsize);
-        // p = model->cat_value_buffer;
         model->row_cvalues = palloc0(model->cat_count * sizeof(char*));
 
         model->result_pa  = (double*) palloc( sizeof(double) * model->dimension);
@@ -876,13 +873,13 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
             char    *value;
             value = SPI_getvalue(spi_tuple, model-> spi_tupdesc, j+1);
 
-            if( model->iscategory[j] == -1) // not in features
-                continue;
-
             if (strcmp(model->keyField,  ModelGetFieldName(j)) == 0)
             {
                 key_field_value = value;
             }
+
+            if( model->iscategory[j] == -1) // not in features
+                continue;
 
             if( model->iscategory[j] == 0)
             {
@@ -896,7 +893,8 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
                     res  = sscanf(value, "%f", &model->row_fvalues[feature_counter]);
                     if(res < 1)
                     {
-                        elog(WARNING,"error input j/cnt=%d/%d %f\n", j, feature_counter, model->row_fvalues[feature_counter]);
+                        elog(WARNING,"error input j/cnt=%d/%d %f\n", j,
+                            feature_counter, model->row_fvalues[feature_counter]);
                     }
                 }
 
@@ -906,7 +904,6 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
             if( model->iscategory[j] == 1)
             {
                 model->row_cvalues[cat_feature_counter] = strcpy(p, value);
-                 // elog(NOTICE, "$$$ %s/%s/%s",p, model->row_cvalues[cat_feature_counter], value);
                 cat_feature_counter++;
                 p += strlen(value);
                 *p = '\0';
@@ -935,6 +932,7 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
             char  ***p;
             double max = 0., sm = 0.;
             int max_i = -1;
+            char* out = model->keyField;
 
             for( j = 0; j < model->dimension; j ++)
             {
@@ -952,16 +950,27 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
 
             p = model->modelClasses + max_i;
 
-            recordDatum = PredictGetDatum(model->keyField, model->current, max, (char*)*p,
+            if (key_field_value)
+            {
+                out = key_field_value;
+            }
+
+
+            recordDatum = PredictGetDatum(out, model->current, max, (char*)*p,
                             functionContext->tuple_desc);
 
         }
         else if (strcmp(model->modelType, "\"RMSE\"") == 0)
         {
+            char* out = "";
 
-            recordDatum = PredictGetDatum(model->keyField, model->current,
-                                          model->result_pa[0], NULL,
-                                          functionContext->tuple_desc);
+            if (key_field_value)
+            {
+                out = key_field_value;
+            }
+            recordDatum = PredictGetDatum(out, model->current, model->result_pa[0], NULL,
+                            functionContext->tuple_desc);
+
         }
         else if (strncmp("\"Logloss\"", model->modelType, 9) == 0)
         {
@@ -980,12 +989,11 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
             recordDatum = PredictGetDatum(out, model->current, probability,
                             (char*)*(model->modelClasses + n),
                             functionContext->tuple_desc);
-
         }
         else
         {
             double probability = sigmoid(model->result_pa[0]);
-
+            char* out = model->keyField;
             if (probability > 0.5)
             {
                 class=yes;
@@ -995,7 +1003,12 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
                 class=no;
             }
 
-            recordDatum = PredictGetDatum(model->keyField, model->current,
+            if (key_field_value)
+            {
+                out = key_field_value;
+            }
+
+            recordDatum = PredictGetDatum(out, model->current,
                                           probability, class,
                                           functionContext->tuple_desc);
 
@@ -1219,7 +1232,7 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
     char *buf = NULL;
     size_t readed = 0;
     size_t count_bytes = 0;
-    char  *filename_str, *p;
+    char  *p;
     int   err;
     StringInfoData query;
     StringInfoData out;
@@ -1227,13 +1240,27 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
     SPITupleTable *tuptable;
     int ret, i;
     text *filename;
-
+    StringInfoData sbuf;
+    char slash[2] = "/\0";
 
     oldcontext = MemoryContextSwitchTo(ml_context);
 
     filename = PG_GETARG_TEXT_PP(0);
 
-    filename_str = text_to_cstring(filename);
+    const char  *filename_str = text_to_cstring(filename);
+
+    initStringInfo(&sbuf);
+    if (strstr(filename_str, slash) == NULL)
+    {
+        int len = strlen( model_path);
+        if (model_path[len-1] == '/')
+            appendStringInfo(&sbuf, "%s%s", model_path, filename_str);
+        else
+            appendStringInfo(&sbuf, "%s/%s", model_path, filename_str);
+
+        filename_str = sbuf.data;
+    }
+
 
     if (stat(filename_str, &stat_info) == -1)
     {
@@ -1293,8 +1320,6 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
         elog(ERROR, "Query errorcode=%d", ret);
     }
 
-    elog(NOTICE,"rows=%ld", SPI_processed);
-
     tuptable = SPI_tuptable;
     if (tuptable == NULL)
         elog(ERROR,"tuptable is null");
@@ -1307,8 +1332,7 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
         appendStringInfo(&out,"float feature:");
         for (i = 0; i < SPI_processed; i++)
         {
-            appendStringInfo(&out, "%s,", SPI_getvalue(tuptable->vals[i],
-                                                        tupdesc, 1));
+            appendStringInfo(&out, "%s,", SPI_getvalue(tuptable->vals[i], tupdesc, 1));
         }
         p = p + out.len - 1;
         *p = '\n';   // SigFall
