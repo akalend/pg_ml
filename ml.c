@@ -34,8 +34,7 @@
 #include "utils/jsonfuncs.h"
 
 
-
-#define ML_VERSION "PgCatBoost 0.4.1"
+#define ML_VERSION "PgCatBoost 0.5.0"
 #define FIELDLEN    64
 #define PAGESIZE    8192
 #define QNaN        0x7fffffff
@@ -72,9 +71,10 @@ typedef struct MLmodelData
 
 #define MLmodel MLmodelData*
 
+
 static MemoryContext ml_context;
 static char* model_path = "";
- 
+
 static double sigmoid(double x);
 static const char* getModelParms(ModelCalcerHandle* modelHandle);
 static char* getModelType(ModelCalcerHandle *modelHandle, const char* info);
@@ -95,6 +95,7 @@ static Datum PredictGetDatum(char* id, int64 row_no, float8 predict, char* class
                     TupleDesc tupleDescriptor);
 static bool check_model_path(char **newval, void **extra, GucSource source);
 
+
 void _PG_init(void);
 
 
@@ -106,7 +107,8 @@ PG_FUNCTION_INFO_V1(ml_cat_predict);
 PG_FUNCTION_INFO_V1(ml_test);
 PG_FUNCTION_INFO_V1(ml_info);
 PG_FUNCTION_INFO_V1(ml_json_parms_info);
-PG_FUNCTION_INFO_V1(ml_predict_dataset);
+
+PG_FUNCTION_INFO_V1(ml_predict_dataset_inner);
 
 
 static double
@@ -118,7 +120,7 @@ sigmoid(double x) {
 Datum
 ml_version(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_TEXT_P(cstring_to_text(ML_VERSION));
+    PG_RETURN_TEXT_P(cstring_to_text(ML_VERSION));
 }
 
 
@@ -146,7 +148,7 @@ CretatePredictTable(char* tablename, char* modelType)
     appendStringInfo(&buf,
         "DROP TABLE IF EXISTS public.%s_predict;",
         tablename);
-    
+
     res = SPI_execute(buf.data, false, 0);
     if(res != SPI_OK_UTILITY )
     {
@@ -196,7 +198,7 @@ CretatePredictTable(char* tablename, char* modelType)
         if(res != SPI_OK_UTILITY )
         {
             elog(ERROR,"error Query: %s", buf.data);
-        }        
+        }
     }
 
     resetStringInfo(&buf);
@@ -242,7 +244,6 @@ LoadModel(text  *filename, ModelCalcerHandle** modelHandle)
     resetStringInfo(&sbuf);
     pfree(sbuf.data);
 }
-
 
 /*
 *  get array names Model features
@@ -379,7 +380,6 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
     if (strcmp(modelType, "\"MultiClass\"") == 0)
         isMultiClass = true;       
 
-
     initStringInfo(&buf);
     appendStringInfo(&buf, "SELECT * FROM public.%s_predict", tabname);
 
@@ -415,7 +415,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
         {
             iscategory[i] = -1;
             continue;
-        } 
+        }
 
         if ( checkInTextArray(spi_tupdesc->attrs[i].attname.data, cat_fields) )
         {
@@ -474,7 +474,6 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
 
             value = SPI_getvalue(spi_tuple, spi_tupdesc, j+1);
 
-            // elog(WARNING, "i=%d val='%s' ", feature_counter, value);
             if( iscategory[j] == 0)
             {
                 if (value == 0 )
@@ -487,8 +486,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
                     res  = sscanf(value, "%f", &row_fvalues[feature_counter]);
                     if(res < 1)
                     {
-                        elog(WARNING,"error input j/cnt=%d/%d\n",
-                                                            j, feature_counter);
+                        elog(WARNING,"error input j/cnt=%d/%d\n", j, feature_counter);
                     }
                 }
 
@@ -588,8 +586,6 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
 Datum
 ml_cat_predict(PG_FUNCTION_ARGS)
 {
-
-
     StringInfoData buf;
     ModelCalcerHandle* modelHandle;
     Datum      *key_datums;
@@ -669,6 +665,7 @@ ml_predict(PG_FUNCTION_ARGS)
 
     predict(modelHandle, tabname, NULL, modelType, modelClasses);
 
+
     if (SPI_finish() != SPI_OK_FINISH)
         elog(WARNING, "could not finish SPI");
 
@@ -681,8 +678,9 @@ ml_predict(PG_FUNCTION_ARGS)
 }
 
 
+
 Datum
-ml_predict_dataset(PG_FUNCTION_ARGS)
+ml_predict_dataset_inner(PG_FUNCTION_ARGS)
 {
     FuncCallContext *functionContext = NULL;
 
@@ -698,25 +696,24 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
         const char*     model_info;
         const int resultColumnCount = 3;
         int             model_float_feature_count;
-        int             model_cat_feature_count;
+        int             model_cat_feature_count ;
         int             model_dimension;
-        int             res;
         size_t          featureCount = 0;
         char            **features;
-        int             cat_feature_counter = 0;
-        int             feature_counter = 0;
+        int             cat_feature_counter=0;
+        int             feature_counter=0;
         int             i;
         MLmodel         model;
         text            *filename;
-        char            *tabname;
         char            *key_field;
+        int             res;
+        bool            function_type = PG_GETARG_BOOL(4);
 
         /* create a function context for cross-call persistence */
         functionContext = SRF_FIRSTCALL_INIT();
 
         filename = PG_GETARG_TEXT_PP(0);
 
-        tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
 
         LoadModel(filename, &modelHandle);
 
@@ -732,8 +729,8 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
             int         key_count;
             Datum      *key_datums;
             bool       *key_nulls;
-
             ArrayType  *key_array = PG_GETARG_ARRAYTYPE_P(2);
+
             if (key_array == NULL) {
                 elog(ERROR, "key is null");
             }
@@ -761,8 +758,16 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
         if (key_field)
             model->keyField = pstrdup(key_field);
 
-        appendStringInfo(&buf, "SELECT * FROM %s;", tabname);
-        res = SPI_exec(buf.data, 0);
+        if (function_type) {
+            char  *query = text_to_cstring(PG_GETARG_TEXT_PP(1));
+            res = SPI_exec(query, 0);
+        }
+        else
+        {
+            char  *tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
+            appendStringInfo(&buf, "SELECT * FROM %s;", tabname);
+            res = SPI_exec(buf.data, 0);
+        }
         if (res < 1 || SPI_tuptable == NULL)
         {
             elog(ERROR, "Query %s error", buf.data);
@@ -825,6 +830,7 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
         model->dimension = model_dimension;
         model->cat_count = cat_feature_counter;
         model->num_count = feature_counter;
+
 
         /*
          * This tuple descriptor must match the output parameters declared for
@@ -1040,6 +1046,7 @@ ml_predict_dataset(PG_FUNCTION_ARGS)
 }
 
 
+
 static char*
 getModelType(ModelCalcerHandle* modelHandle, const char* info)
 {
@@ -1178,6 +1185,8 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
 }
 
 
+
+
 Datum
 ml_info(PG_FUNCTION_ARGS)
 {
@@ -1219,6 +1228,7 @@ ml_info(PG_FUNCTION_ARGS)
 
     ModelCalcerDelete(modelHandle);
 
+
     PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
 
@@ -1239,15 +1249,12 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
     TupleDesc tupdesc;
     SPITupleTable *tuptable;
     int ret, i;
-    text *filename;
     StringInfoData sbuf;
     char slash[2] = "/\0";
 
+    const char  *filename_str = text_to_cstring(PG_GETARG_TEXT_PP(0));
     oldcontext = MemoryContextSwitchTo(ml_context);
 
-    filename = PG_GETARG_TEXT_PP(0);
-
-    const char  *filename_str = text_to_cstring(filename);
 
     initStringInfo(&sbuf);
     if (strstr(filename_str, slash) == NULL)
@@ -1385,6 +1392,7 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
 }
 
 
+
 static Datum
 PredictGetDatum(char* id, int64 row_no, float8 predict, char* className, 
                 TupleDesc tupleDescriptor)
@@ -1396,7 +1404,7 @@ PredictGetDatum(char* id, int64 row_no, float8 predict, char* className,
     memset(values, 0, sizeof(values));
     memset(isNulls, false, sizeof(isNulls));
 
-    
+
     if ( strncmp("row", id, 3) )
     {
         values[0] = CStringGetTextDatum(id);
@@ -1424,7 +1432,6 @@ PredictGetDatum(char* id, int64 row_no, float8 predict, char* className,
 }
 
 
-
 /*
  * see ReceiveResults(WorkerSession *session, bool storeRows)
  *
@@ -1432,6 +1439,9 @@ PredictGetDatum(char* id, int64 row_no, float8 predict, char* className,
 Datum
 ml_test(PG_FUNCTION_ARGS)
 {
+
+
+
     PG_RETURN_TEXT_P(NULL);
 }
 
