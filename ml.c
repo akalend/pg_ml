@@ -2,12 +2,13 @@
  * ml.c
  *
  * Alexandre Kalendarev <akalend@mail.ru>
- * 
+ *
  *
  *  test this code:
- *  SELECT ml_predict ('titanic.cbm', 'titanic','{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }');
- *  SELECT ml_predict ('adult.cbm',   'adult2','{workclass,education,marital_status, occupation,relationship,race,sex,native_country}');
+ *  SELECT * FROM  ml_predict ('titanic.cbm', 'titanic','{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }');
+ *  SELECT * FROM ml_predict ('adult.cbm',   'adult2','{workclass,education,marital_status, occupation,relationship,race,sex,native_country}');
  *  select  json_array_elements((j #> '{features_info,float_features}')::json) #> '{feature_id}'     from parms  WHERE name='astra_all';
+     SELECT name, j #> '{data_processing_options,class_names}' classes, j #>'{loss_function,type}' as loss  FROM parms ;
 
  */
 #include <errno.h>
@@ -341,7 +342,7 @@ pstrcasecmp(char  *s1, char  *s2)
         {
             return false;
         }
-        
+
         p1 ++;
         p2 ++;
     }
@@ -636,7 +637,7 @@ ml_cat_predict(PG_FUNCTION_ARGS)
 
     initStringInfo(&buf);
     appendStringInfo(&buf, "public.%s_predict", tabname);
-    
+
 
     PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
@@ -662,6 +663,7 @@ ml_predict(PG_FUNCTION_ARGS)
     modelType = getModelType(modelHandle, model_info);
     CretatePredictTable(tabname, modelType);
     modelClasses = getModelClasses(modelHandle, model_info);
+
 
     predict(modelHandle, tabname, NULL, modelType, modelClasses);
 
@@ -689,7 +691,6 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
         MemoryContext oldContext;
         TupleDesc tupleDescriptor;
         ArrayDatum  cat_fields = {0, NULL};
-
         StringInfoData buf;
         ModelCalcerHandle* modelHandle;
         // SPITupleTable   *spi_tuptable;
@@ -909,9 +910,17 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
 
             if( model->iscategory[j] == 1)
             {
-                model->row_cvalues[cat_feature_counter] = strcpy(p, value);
+                if (!value)
+                {
+                    model->row_cvalues[cat_feature_counter] = pstrdup("NaN");
+                    p += 3;
+                }
+                else
+                {
+                    model->row_cvalues[cat_feature_counter] = strcpy(p, value);
+                    p += strlen(value);
+                }
                 cat_feature_counter++;
-                p += strlen(value);
                 *p = '\0';
                 p++;
             }
@@ -1149,9 +1158,8 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
         char*** p;
 
         res = (char***) palloc( sizeof(char*) * (
-                getJsonbLength((const JsonbContainer*) j,1) + 1)
+                getJsonbLength((const JsonbContainer*) j,0) + 1)
               );
-
         p = res;
         it = JsonbIteratorInit(&j->root);
 
@@ -1163,6 +1171,7 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
                 {
                   *p = (char**)pnstrdup(jb.val.string.val, jb.val.string.len);
                    p++;
+                   continue;
                 }
                 if(jb.type == jbvNumeric)
                 {
@@ -1173,7 +1182,9 @@ getModelClasses(ModelCalcerHandle* modelHandle, const char* info)
                                             DirectFunctionCall1(numeric_out,
                                               NumericGetDatum(num))));
                     p++;
+                   continue;
                 }
+                elog(ERROR, "undefined jsonb type num=%d",jb.type);
             }
         }
         *p = NULL;
@@ -1394,7 +1405,7 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
 
 
 static Datum
-PredictGetDatum(char* id, int64 row_no, float8 predict, char* className, 
+PredictGetDatum(char* id, int64 row_no, float8 predict, char* className,
                 TupleDesc tupleDescriptor)
 {
     Datum values[3];
