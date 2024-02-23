@@ -1,18 +1,19 @@
-# contrib/dblink/Makefile
+# contrib/ml/Makefile
 MODULE_big = ml
 
 OBJS = \
 	$(WIN32RES) \
 	ml.o
-PG_CPPFLAGS = -I$(libpq_srcdir)
-SHLIB_LINK_INTERNAL = $(libpq) -L.  -lcatboostmodel -lc -lm -pthread
+PG_CPPFLAGS = -I$(libpq_srcdir) -ggdb
+SHLIB_LINK_INTERNAL = $(libpq) -lcatboostmodel -lc -lm -pthread
 
 EXTENSION = ml
-DATA = ml--0.5.sql 
+DATA = ml--0.2.sql 
 PGFILEDESC = "ml - prediction data in ml model"
 
-REGRESS = ml
-REGRESS_OPTS = --dlpath=$(top_builddir)/src/test/regress
+REGRESS = ml init
+REGRESS_OPTS = --dlpath=$(top_builddir)/src/test/regress 
+
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config

@@ -166,3 +166,31 @@ export LD_LIBRARY_PATH=/usr/local/lib:/usr/local/pgsql/lib
 ```
 
 More detail information You can see in the docs/pg_ml.pdf
+
+## Testing
+```
+./test.py 
+============== removing existing temp instance        ==============
+============== creating temporary instance            ==============
+============== initializing database system           ==============
+============== starting postmaster                    ==============
+running on port 51697 with PID 54101
+============== creating database "contrib_regression" ==============
+CREATE DATABASE
+ALTER DATABASE
+ALTER DATABASE
+ALTER DATABASE
+ALTER DATABASE
+ALTER DATABASE
+ALTER DATABASE
+============== running regression test queries        ==============
+test ml                           ... ok           19 ms
+test init                         ... ok            8 ms
+test predict                      ... ok           49 ms
+============== shutting down postmaster               ==============
+============== removing temporary instance            ==============
+
+=====================
+ All 3 tests passed. 
+=====================
+```

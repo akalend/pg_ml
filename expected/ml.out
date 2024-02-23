@@ -1,0 +1,29 @@
+CREATE EXTENSION ml;
+SELECT ml_version();
+    ml_version    
+------------------
+ PgCatBoost 0.5.0
+(1 row)
+
+SHOW ml.model_path;
+ ml.model_path 
+---------------
+ /tmp/model
+(1 row)
+
+SELECT ml_info('astra3.cbm');
+                                   ml_info                                    
+------------------------------------------------------------------------------
+ dimension:3 numeric features:12 categorial features:0 modelType "MultiClass"+
+ fieldName:alpha,delta,u,g,r,i,z,cam_col,redshift,plate,MJD,fiber_ID 
+(1 row)
+
+SELECT ml_info('titanic.cbm');
+ERROR:  file /tmp/model/titanic.cbm has error: 2:No such file or directory
+SELECT ml_info('adult.cbm');
+                                                                             ml_info                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ dimension:1 numeric features:6 categorial features:8 modelType "Logloss"                                                                                       +
+ fieldName:age,workclass,fnlwgt,education,education-num,marital-status,occupation,relationship,race,sex,capital-gain,capital-loss,hours-per-week,native-country 
+(1 row)
+
