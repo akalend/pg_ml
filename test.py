@@ -33,7 +33,7 @@ cmd = [ '../../src/test/regress/pg_regress',
 		'--temp-config=/tmp/model/postgresql.conf',
 		'ml',		# ml.sql
 		'init',		# init.sql
-		'predict'	# predict.sql
+		'astra'		# astra.sql
 	  ]
 
 subprocess.run( cmd, env={'PATH': env_path, "LD_LIBRARY_PATH": lib_path}, cwd=cwd)
