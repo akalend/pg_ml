@@ -7,7 +7,9 @@ all ideas send to author akalend dog mail dot ru, please.
 
 ## folders
 **docs** - documentation in slides:
+
     - [russian](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml_rus.pdf)
+    
     - [english](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml.pdf)
 
 **learn** - train model notebooks
