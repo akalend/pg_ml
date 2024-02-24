@@ -1,12 +1,18 @@
+![pg_ml](/docs/pg_ml.png)
+
+
 # pg_ml Machine learning module 
-in development, don't stable
+in development, 
+all ideas send to author akalend dog mail dot ru, please.
 
 ## folders
-docs - documentation and slides
+**docs** - documentation in slides:
+    - [russian](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml_rus.pdf)
+    - [english](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml.pdf)
 
-learn - train model notebooks
+**learn** - train model notebooks
 
-data - dumps of datasets
+**data** - dumps of datasets
 ```
 	-rw-rw-r-- 207344 ноя 16 20:36 adult.dmp.gz
 	-rw-rw-r--  17687 ноя 16 20:37 astra.dmp.gz
@@ -16,12 +22,17 @@ data - dumps of datasets
 
 ## Prediction
 
+ML prediction use the [CatBoost] (https://catboost.ai/) based on the categorical boosting algorithm.
+
 The prediction has so far been made  for:
  - binary classification
  - multi classification
  - regression
+ - ranking (in the development)
 
 ## Installation
+
+ Variable $PG_HOME is the postgres home directory. Default is:  PG_HOME=/usr/local/bin
 
 - export PG_HOME=/usr/local/pgsql    //where is main postgres folder
 
@@ -43,9 +54,9 @@ The prediction has so far been made  for:
 
 - USE_PGXS=1 make install
 
-- chown postgres model.cbm
-
-- [optional] cp model.cbm $PG_HOME/data
+- copy model to model folder:  $PG_DATA/model
+[optional] chown postgres model.cbm
+[optional] sudo cp model.cbm $PG_HOME/model
 
 
 ## Configuration
@@ -54,8 +65,8 @@ Youneed to create a directory and assign permissions for postgress process.
 Add to configuration file: postgresql.conf
 ```js
 
-ml.model_path='/usr/local/pgsql/model'   # any path to model directory
-
+ml.model_path='/usr/local/pgsql/model'  # any path to model directory
+                                        # You must set the postgres owner on the directory 
 ```
 
 Check path variable:
