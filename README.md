@@ -1,18 +1,17 @@
+
+
+# Machine learning module 
 ![pg_ml](/docs/pg_ml.png)
 
-
-# pg_ml Machine learning module 
-in development, 
 all ideas send to author akalend dog mail dot ru, please.
 
 ## folders
 **docs** - documentation in slides:
 
     - [russian](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml_rus.pdf)
-    
     - [english](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml.pdf)
 
-**learn** - train model notebooks
+**learn** - train model and notebooks
 
 **data** - dumps of datasets
 ```
