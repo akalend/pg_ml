@@ -16,10 +16,10 @@ all ideas send to author akalend dog mail dot ru, please.
 
 [data](https://github.com/akalend/pg_ml/tree/main/data) - dumps of datasets
 ```
-	-rw-rw-r-- 207344 ноя 16 20:36 adult.dmp.gz
-	-rw-rw-r--  17687 ноя 16 20:37 astra.dmp.gz
-	-rw-rw-r--  13578 ноя 16 22:43 boston.dmp.gz
-	-rw-rw-r--  12903 ноя 16 20:34 titanic.dmp.gz
+	-rw-rw-r-- 207344 ноя 16 20:36 adult.dmp.gz    - binary classification with inner classes name
+	-rw-rw-r--  17687 ноя 16 20:37 astra.dmp.gz    - multi classification with inner classes name
+	-rw-rw-r--  13578 ноя 16 22:43 boston.dmp.gz   - regression
+	-rw-rw-r--  12903 ноя 16 20:34 titanic.dmp.gz  - binary classification
 ```
 
 ## Prediction
@@ -27,9 +27,9 @@ all ideas send to author akalend dog mail dot ru, please.
 ML prediction use the [CatBoost] (https://catboost.ai/) based on the categorical boosting algorithm.
 
 The prediction has so far been made  for:
- - binary classification
- - multi classification
- - regression
+ - binary classification  (titanic, adult)
+ - multi classification   (astra)
+ - regression             (boston)  
  - ranking (in the development)
 
 ## Installation
