@@ -200,6 +200,7 @@ ALTER DATABASE
 test ml                           ... ok           19 ms
 test init                         ... ok            8 ms
 test predict                      ... ok           49 ms
+test titanic                      ... ok           32 ms
 ============== shutting down postmaster               ==============
 ============== removing temporary instance            ==============
 
