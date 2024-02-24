@@ -27,9 +27,9 @@ all ideas send to author akalend dog mail dot ru, please.
 ML prediction use the [CatBoost] (https://catboost.ai/) based on the categorical boosting algorithm.
 
 The prediction has so far been made  for:
- - binary classification  (titanic, adult)
- - multi classification   (astra)
- - regression             (boston)  
+ - binary classification  dataset:(titanic, adult)
+ - multi classification   dataset:(astra)
+ - regression             dataset:(boston)  
  - ranking (in the development)
 
 ## Installation
@@ -201,6 +201,7 @@ test ml                           ... ok           19 ms
 test init                         ... ok            8 ms
 test predict                      ... ok           49 ms
 test titanic                      ... ok           32 ms
+test json                         ... ok         4531 ms
 ============== shutting down postmaster               ==============
 ============== removing temporary instance            ==============
 

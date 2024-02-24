@@ -34,7 +34,8 @@ cmd = [ '../../src/test/regress/pg_regress',
 		'ml',		# ml.sql
 		'init',		# init.sql
 		'astra',	# astra.sql
-		'titanic'	# titanic.sql
+		'titanic',	# titanic.sql
+		'json'		# check json model 
 	  ]
 
 subprocess.run( cmd, env={'PATH': env_path, "LD_LIBRARY_PATH": lib_path}, cwd=cwd)
