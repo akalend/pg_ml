@@ -23,3 +23,26 @@ SELECT * FROM astra LIMIT 2;
  240.063240247767 | 6.13413059813973 | 17.86033 | 16.79228 | 16.43001 | 16.30923 | 16.25873 |   3894 |       1 |      243 | 2.4489280322708705e+18 | 0.0003448142 |  2175 | 54612 |      348
 (2 rows)
 
+CREATE TABLE public.titanic (
+    id integer,
+    passenger_id integer,
+    pclass integer,
+    name text,
+    sex text,
+    age double precision,
+    sibsp integer,
+    parch integer,
+    ticket text,
+    fare double precision,
+    cabin text,
+    embarked character(1),
+    res boolean
+);
+COPY titanic FROM '/tmp/model/titanic.csv' HEADER CSV; 
+SELECT * FROM titanic LIMIT 2;
+ id | passenger_id | pclass |               name               |  sex   | age  | sibsp | parch | ticket |  fare  | cabin | embarked | res 
+----+--------------+--------+----------------------------------+--------+------+-------+-------+--------+--------+-------+----------+-----
+  0 |          892 |      3 | Kelly, Mr. James                 | male   | 34.5 |     0 |     0 | 330911 | 7.8292 | -999  | Q        | f
+  1 |          893 |      3 | Wilkes, Mrs. James (Ellen Needs) | female |   47 |     1 |     0 | 363272 |      7 | -999  | S        | f
+(2 rows)
+

@@ -19,7 +19,12 @@ SELECT ml_info('astra3.cbm');
 (1 row)
 
 SELECT ml_info('titanic.cbm');
-ERROR:  file /tmp/model/titanic.cbm has error: 2:No such file or directory
+                                      ml_info                                      
+-----------------------------------------------------------------------------------
+ dimension:1 numeric features:2 categorial features:9 modelType "Logloss"         +
+ fieldName:PassengerId,Pclass,Name,Sex,Age,SibSp,Parch,Ticket,Fare,Cabin,Embarked 
+(1 row)
+
 SELECT ml_info('adult.cbm');
                                                                              ml_info                                                                             
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------
