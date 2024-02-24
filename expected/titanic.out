@@ -1,0 +1,40 @@
+SELECT ml_predict_table('titanic.cbm', 'titanic', '{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }');
+NOTICE:  table "titanic_predict" does not exist, skipping
+    ml_predict_table    
+------------------------
+ public.titanic_predict
+(1 row)
+
+SELECT passenger_id ,name,predict,class,res as result FROM titanic_predict limit 3;
+ passenger_id |               name               | predict  | class | result 
+--------------+----------------------------------+----------+-------+--------
+          892 | Kelly, Mr. James                 | 0.142616 | 0     | f
+          893 | Wilkes, Mrs. James (Ellen Needs) | 0.310916 | 0     | f
+          894 | Myles, Mr. Thomas Francis        | 0.083718 | 0     | f
+(3 rows)
+
+SELECT index as name,class FROM ml_predict('titanic.cbm', 'titanic', '{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }', 'name') LIMIT 3;
+               name               | class 
+----------------------------------+-------
+ Kelly, Mr. James                 | 0
+ Wilkes, Mrs. James (Ellen Needs) | 0
+ Myles, Mr. Thomas Francis        | 0
+(3 rows)
+
+SELECT index name,predict,class survived
+  FROM ml_predict_query('titanic.cbm', 'select * FROM titanic LIMIT 3', '{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }', 'name');
+               name               |       predict       | survived 
+----------------------------------+---------------------+----------
+ Kelly, Mr. James                 | 0.14261550408912857 | 0
+ Wilkes, Mrs. James (Ellen Needs) |  0.3109161066836635 | 0
+ Myles, Mr. Thomas Francis        | 0.08371776629817723 | 0
+(3 rows)
+
+SELECT * FROM ml_predict('titanic.cbm', 'titanic', '{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }') LIMIT 3;
+ index |       predict       | class 
+-------+---------------------+-------
+ 0     | 0.14261550408912857 | 0
+ 1     |  0.3109161066836635 | 0
+ 2     | 0.08371776629817723 | 0
+(3 rows)
+
