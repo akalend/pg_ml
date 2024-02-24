@@ -6,15 +6,15 @@
 all ideas send to author akalend dog mail dot ru, please.
 
 ## folders
-**docs** - documentation in slides:
+[docs](https://github.com/akalend/pg_ml/tree/main/dcos) - documentation in slides:
 
 - [russian](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml_rus.pdf)
 
 - [english](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml.pdf)
 
-**learn** - train model and notebooks
+[learn](https://github.com/akalend/pg_ml/tree/main/learn) - train model and notebooks
 
-**data** - dumps of datasets
+[data](https://github.com/akalend/pg_ml/tree/main/data) - dumps of datasets
 ```
 	-rw-rw-r-- 207344 ноя 16 20:36 adult.dmp.gz
 	-rw-rw-r--  17687 ноя 16 20:37 astra.dmp.gz
