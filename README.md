@@ -206,6 +206,6 @@ test json                         ... ok         4531 ms
 ============== removing temporary instance            ==============
 
 =====================
- All 3 tests passed. 
+ All 5 tests passed. 
 =====================
 ```

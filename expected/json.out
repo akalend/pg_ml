@@ -1,14 +1,52 @@
 select ml_json_info('astra.json');
-                               ml_json_info                               
---------------------------------------------------------------------------
- float feature:alpha,delta,u,g,r,i,z,cam_col,redshift,plate,MJD,fiber_ID,+
- categorial feature:
-(1 row)
+   ml_json_info   
+------------------
+ (g,float)
+ (delta,float)
+ (r,float)
+ (plate,float)
+ (redshift,float)
+ (u,float)
+ (MJD,float)
+ (z,float)
+ (fiber_ID,float)
+ (alpha,float)
+ (cam_col,float)
+ (i,float)
+(12 rows)
 
-select ml_json_info('boston.json');
-                                      ml_json_info                                       
------------------------------------------------------------------------------------------
- float feature:Unnamed: 0,crim,zn,indus,chas,nox,rm,age,dis,rad,tax,ptratio,black,lstat,+
- categorial feature:
-(1 row)
+select * from ml_json_info('boston.json');
+  feature   | type  
+------------+-------
+ zn         | float
+ indus      | float
+ chas       | float
+ black      | float
+ lstat      | float
+ Unnamed: 0 | float
+ rad        | float
+ tax        | float
+ nox        | float
+ rm         | float
+ dis        | float
+ age        | float
+ ptratio    | float
+ crim       | float
+(14 rows)
+
+select * from ml_json_info('titanic.json');
+   feature   | type  
+-------------+-------
+ Pclass      | text
+ PassengerId | text
+ Cabin       | text
+ Embarked    | text
+ Ticket      | text
+ Age         | float
+ Name        | text
+ Parch       | text
+ SibSp       | text
+ Sex         | text
+ Fare        | float
+(11 rows)
 

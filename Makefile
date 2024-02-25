@@ -8,7 +8,7 @@ PG_CPPFLAGS = -I$(libpq_srcdir) -ggdb
 SHLIB_LINK_INTERNAL = $(libpq) -lcatboostmodel -lc -lm -pthread
 
 EXTENSION = ml
-DATA = ml--0.2.sql 
+DATA = ml--0.6.sql 
 PGFILEDESC = "ml - prediction data in ml model"
 
 REGRESS = ml init

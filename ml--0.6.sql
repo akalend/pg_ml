@@ -68,10 +68,14 @@ AS 'MODULE_PATHNAME','ml_info'
 LANGUAGE C STRICT PARALLEL RESTRICTED;
 
 
-CREATE OR REPLACE FUNCTION ml_json_info(model text )
-RETURNS text
+CREATE OR REPLACE FUNCTION ml_json_info(
+    model text,
+    OUT feature text,
+    OUT type text
+) RETURNS setof RECORD
 AS 'MODULE_PATHNAME','ml_json_parms_info'
 LANGUAGE C STRICT PARALLEL RESTRICTED;
+
 
 
 

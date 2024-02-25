@@ -35,7 +35,7 @@
 #include "utils/jsonfuncs.h"
 
 
-#define ML_VERSION "PgCatBoost 0.5.0"
+#define ML_VERSION "PgCatBoost 0.6.0"
 #define FIELDLEN    64
 #define PAGESIZE    8192
 #define QNaN        0x7fffffff
@@ -72,8 +72,15 @@ typedef struct MLmodelData
 
 #define MLmodel MLmodelData*
 
+typedef struct SpiData
+{
+    SPITupleTable      *tuple_table;
+    TupleDesc           tuple_desc;
+    int                 current;
+} SpiData;
+#define SpiInfo SpiData*
 
-static MemoryContext ml_context;
+
 static char* model_path = "";
 
 static double sigmoid(double x);
@@ -94,6 +101,9 @@ static void predict(ModelCalcerHandle  *modelHandle, char  *tabname,
                     char*** modelClasses);
 static Datum PredictGetDatum(char* id, int64 row_no, float8 predict, char* className,
                     TupleDesc tupleDescriptor);
+static Datum FeatureTypeGetDatum(char* featureName, char* featureType,
+                    TupleDesc tupleDescriptor);
+
 static bool check_model_path(char **newval, void **extra, GucSource source);
 
 
@@ -1243,11 +1253,164 @@ ml_info(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
 
-
 Datum
 ml_json_parms_info(PG_FUNCTION_ARGS)
 {
+    FuncCallContext *functionContext = NULL;
+
+
+   if (SRF_IS_FIRSTCALL())
+    {
+        MemoryContext oldContext;
+        TupleDesc tupleDescriptor;
+        StringInfoData sbuf;
+        StringInfoData query;
+        char *buf = NULL;
+        FILE *model = NULL;
+        const int resultColumnCount = 2;
+        int   err;
+        struct stat stat_info;
+        char slash[2] = "/\0";
+        int count_bytes = 0;
+        char *p;
+        int readed = 0;
+        const char  *filename_str = text_to_cstring(PG_GETARG_TEXT_PP(0));
+        int res;
+        SpiInfo info;
+
+        /* create a function context for cross-call persistence */
+        functionContext = SRF_FIRSTCALL_INIT();
+
+
+        oldContext = MemoryContextSwitchTo(
+            functionContext->multi_call_memory_ctx);
+
+        initStringInfo(&sbuf);
+        if (strstr(filename_str, slash) == NULL)
+        {
+            int len = strlen( model_path);
+            if (model_path[len-1] == '/')
+                appendStringInfo(&sbuf, "%s%s", model_path, filename_str);
+            else
+                appendStringInfo(&sbuf, "%s/%s", model_path, filename_str);
+
+            filename_str = sbuf.data;
+        }
+
+
+        if (stat(filename_str, &stat_info) == -1)
+        {
+            err = errno;
+            elog(ERROR, "file %s has error: %d:%s",filename_str, err, strerror(err));
+        }
+
+        if (stat_info.st_size < 16)
+        {
+            elog(ERROR, "file %s has very small size: %ld",filename_str,
+                stat_info.st_size);
+        }
+
+        model = fopen(filename_str, PG_BINARY_R);
+        if (model == NULL){
+            err = errno;
+            elog(ERROR, "Cannot open model file \"%s\": %s",
+                 filename_str, strerror(err));
+        }
+
+        buf = (char*)palloc0(stat_info.st_size+1);
+        if (!buf)
+        {
+            elog(ERROR, "the filesize %s is very big %ld", filename_str,
+                stat_info.st_size);
+        }
+
+        p = buf;
+        while (!feof(model)){
+            readed = fread(p, 1, PAGESIZE, model);
+            p += readed;
+            count_bytes += readed;
+        }
+
+        fclose(model);
+        if (count_bytes != stat_info.st_size)
+        {
+            err = errno;
+            elog(ERROR, "error readed len=%d/%ld from file \n%s", readed,
+                stat_info.st_size,strerror(err));
+        }
+
+
+
+        initStringInfo(&query);
+        appendStringInfo(&query,
+        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,categorical_features}')::json)"
+        " #>>'{feature_id}' name,'text' type  "
+        "UNION "
+        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,float_features}')::json)"
+        " #>>'{feature_id}' name,'float' type  ",
+        buf,buf);
+
+        SPI_connect();
+        res = SPI_exec(query.data, 0);
+        if (res < 1 || SPI_tuptable == NULL)
+        {
+            elog(ERROR, "Query json error" );
+        }
+
+        /*
+         * This tuple descriptor must match the output parameters declared for
+         * the function in pg_proc.
+         */
+        tupleDescriptor = CreateTemplateTupleDesc(resultColumnCount);
+        TupleDescInitEntry(tupleDescriptor, (AttrNumber) 1, "feature",
+                           TEXTOID, -1, 0);
+        TupleDescInitEntry(tupleDescriptor, (AttrNumber) 2, "type",
+                           TEXTOID, -1, 0);
+
+        functionContext->tuple_desc =  BlessTupleDesc(tupleDescriptor);
+
+        info = (SpiInfo) palloc0(sizeof(SpiData));
+        info->tuple_table = SPI_tuptable;
+        info->tuple_desc =  info->tuple_table->tupdesc;
+        info->current = 0;
+
+        functionContext->max_calls = SPI_processed;
+        functionContext->user_fctx = info;
+
+
+        MemoryContextSwitchTo(oldContext);
+    }
+
+    functionContext = SRF_PERCALL_SETUP();
+
+    if ( ((SpiInfo)functionContext->user_fctx)->current < functionContext->max_calls)
+    {
+        SpiInfo jsonInfo = (SpiInfo)functionContext->user_fctx;
+        HeapTuple   spi_tuple = jsonInfo->tuple_table->vals[jsonInfo->current];
+        char *value = SPI_getvalue(spi_tuple, jsonInfo->tuple_desc, 1);
+        char *type = SPI_getvalue(spi_tuple, jsonInfo->tuple_desc, 2);
+        Datum   recordDatum = FeatureTypeGetDatum(value ,type,functionContext->tuple_desc);
+        jsonInfo->current ++;
+        SRF_RETURN_NEXT(functionContext, recordDatum);
+    }
+    else
+    {
+        if (SPI_finish() != SPI_OK_FINISH)
+            elog(WARNING, "could not finish SPI");
+
+        SRF_RETURN_DONE(functionContext);
+    }
+
+
+}
+
+Datum ml_json_parms_info_old(PG_FUNCTION_ARGS);
+
+Datum
+ml_json_parms_info_old(PG_FUNCTION_ARGS)
+{
     MemoryContext oldcontext;
+    MemoryContext ml_context;
     FILE *model = NULL;
     struct stat stat_info;
     char *buf = NULL;
@@ -1257,13 +1420,19 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
     int   err;
     StringInfoData query;
     StringInfoData out;
+    char *out2;
     TupleDesc tupdesc;
     SPITupleTable *tuptable;
     int ret, i;
     StringInfoData sbuf;
-    char slash[2] = "/\0";
+    char slash[2] = "/\0";    
 
     const char  *filename_str = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    ml_context = AllocSetContextCreate(CurrentMemoryContext,
+                                       "ml",
+                                       ALLOCSET_SMALL_MINSIZE,        // 0
+                                       ALLOCSET_SMALL_INITSIZE,       // 1K
+                                       (ALLOCSET_DEFAULT_MAXSIZE * 2)); // 8K -> 8M
     oldcontext = MemoryContextSwitchTo(ml_context);
 
 
@@ -1329,7 +1498,6 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
 
     tuptable = SPI_tuptable;
     SPI_connect();
-
     ret = SPI_exec(query.data, 0);
     tuptable = SPI_tuptable;
 
@@ -1350,10 +1518,12 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
         appendStringInfo(&out,"float feature:");
         for (i = 0; i < SPI_processed; i++)
         {
-            appendStringInfo(&out, "%s,", SPI_getvalue(tuptable->vals[i], tupdesc, 1));
+            char *val = SPI_getvalue(tuptable->vals[i], tupdesc, 1);
+            appendStringInfo(&out, "%s,", val);
+            pfree(val);
+            
         }
-        p = p + out.len - 1;
-        *p = '\n';   // SigFall
+        p = out.data + out.len - 1;
     }
     else
     {
@@ -1361,13 +1531,21 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
     }
 
 
+    elog(WARNING, "----->%s", out.data);
+    out2 = pnstrdup(out.data, out.len-1);
+    elog(WARNING, "=====>%s", out2);
+
+
+    SPI_finish();
+    SPI_connect();
     resetStringInfo(&query);
     appendStringInfo(&query,
         "SELECT json_array_elements(('%s'::jsonb #> '{features_info,categorical_features}')::json)"
         " #>> '{feature_id}'", buf);
 
-
     tuptable = SPI_tuptable;
+
+
 
     ret = SPI_exec(query.data, 0);
     tuptable = SPI_tuptable;
@@ -1383,21 +1561,35 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
 
     tupdesc = tuptable->tupdesc;
 
-    appendStringInfo(&out,"\ncategorial feature:");
-    for (i = 0; i < SPI_processed; i++)
+    resetStringInfo(&out);
+    if (SPI_processed > 0)
     {
-        appendStringInfo(&out, "%s,", SPI_getvalue(tuptable->vals[i], tupdesc, 1));
+        appendStringInfo(&out,"\ncategorial feature:");
+        for (i = 0; i < SPI_processed; i++)
+        {
+            char *val = SPI_getvalue(tuptable->vals[i], tupdesc, 1);    
+            appendStringInfo(&out, "%s,", val);
+            elog(WARNING, "%s len=%d\t%s", out.data, out.len, val);
+            pfree(val);
+        }
+        
+        // p = out2.data + out2.len - 1;
+        // *p = ' ';
     }
-    *(p + out.len - 1) = '\n';
+    else
+    {
+        appendStringInfo(&out,"none categorial feature\n");
+    }
 
     SPI_finish();
 
-    pfree(buf);
-    pfree(query.data);
-
+    elog(WARNING, "****%s", out.data);
+    elog(WARNING, "####%s", out2);
     /* Reset our memory context and switch back to the original one */
-    MemoryContextSwitchTo(oldcontext);
-    MemoryContextReset(ml_context);
+    appendStringInfo(&out,"%s" ,out2);
+
+    MemoryContextSwitchTo(oldcontext);    
+    MemoryContextDelete(ml_context);
 
     PG_RETURN_TEXT_P(cstring_to_text(out.data));
 }
@@ -1442,6 +1634,26 @@ PredictGetDatum(char* id, int64 row_no, float8 predict, char* className,
     return (Datum) HeapTupleGetDatum(htuple);
 }
 
+
+static Datum
+FeatureTypeGetDatum(char* featureName, char* featureType,
+                TupleDesc tupleDescriptor)
+{
+    Datum values[2];
+    bool isNulls[2];
+    HeapTuple htuple;
+
+    memset(values, 0, sizeof(values));
+    memset(isNulls, false, sizeof(isNulls));
+
+    values[0] = CStringGetTextDatum(featureName);
+    isNulls[0] = false;
+    values[1] =  CStringGetTextDatum(featureType);
+    isNulls[1] = false;
+
+    htuple = heap_form_tuple(tupleDescriptor, values, isNulls);
+    return (Datum) HeapTupleGetDatum(htuple);
+}
 
 /*
  * see ReceiveResults(WorkerSession *session, bool storeRows)
@@ -1516,9 +1728,5 @@ _PG_init(void)
                                0,
                                check_model_path, NULL, NULL);
 
-    MarkGUCPrefixReserved("ml");
-
-    ml_context = AllocSetContextCreate(TopMemoryContext,
-                                       "ml",
-                                       ALLOCSET_DEFAULT_SIZES); // 8K -> 8M
+    MarkGUCPrefixReserved("ml");    
 }
