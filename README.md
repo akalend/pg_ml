@@ -105,14 +105,21 @@ SELECT ml_info('titanic.cbm');
 (1 row)
 
 --- If You save train model as json format
-SELECT ml_json_info('astra.json');
-NOTICE:  rows=12
-NOTICE:  rows=0
-                               ml_json_info                               
---------------------------------------------------------------------------
- float feature:alpha,delta,u,g,r,i,z,cam_col,redshift,plate,MJD,fiber_ID,+
- categorial feature:
-(1 row)
+SELECT * FROM  ml_json_info('titanic.json') ;
+   feature   | type  
+-------------+-------
+ Pclass      | text
+ PassengerId | text
+ Cabin       | text
+ Embarked    | text
+ Ticket      | text
+ Age         | float
+ Name        | text
+ Parch       | text
+ SibSp       | text
+ Sex         | text
+ Fare        | float
+(11 rows)
 
 ```
 
