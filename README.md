@@ -57,8 +57,10 @@ The prediction has so far been made  for:
 - USE_PGXS=1 make install
 
 - copy model to model folder:  $PG_DATA/model
-[optional] chown postgres model.cbm
-[optional] sudo cp model.cbm $PG_HOME/model
+  
+	[optional] chown postgres model.cbm
+
+	[optional] sudo cp model.cbm $PG_HOME/model
 
 
 ## Configuration
