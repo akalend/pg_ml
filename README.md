@@ -58,9 +58,7 @@ The prediction has so far been made  for:
 
 - copy model to model folder:  $PG_DATA/model
   
-	[optional] chown postgres model.cbm
-
-	[optional] sudo cp model.cbm $PG_HOME/model
+- chown postgres model.cbm
 
 
 ## Configuration
