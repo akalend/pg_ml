@@ -65,7 +65,12 @@ The prediction has so far been made  for:
 
 ## Configuration
 
-Youneed to create a directory and assign permissions for postgress process.
+You need to create a directory and assign permissions for postgress process.
+```bash
+cd /usr/local/pgsql/
+sudo mkdir model                // create model dir 
+sudo chown postgres model       // set postgres owner
+```
 Add to configuration file: postgresql.conf
 ```js
 
