@@ -30,7 +30,7 @@ The prediction has so far been made  for:
  - binary classification  dataset:(titanic, adult)
  - multi classification   dataset:(astra)
  - regression             dataset:(boston)  
- - ranking (in the development)
+ - ranking                dataset:(MSRank)
 
 ## Installation
 
