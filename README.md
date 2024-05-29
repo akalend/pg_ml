@@ -56,14 +56,21 @@ The prediction has so far been made  for:
 
 - USE_PGXS=1 make install
 
-- copy model to model folder:  $PG_DATA/model
-[optional] chown postgres model.cbm
-[optional] sudo cp model.cbm $PG_HOME/model
+- chown postgres model.cbm
+  
+- copy model to model folder:  $PG_DATA/model [optional]
+  
+
 
 
 ## Configuration
 
-Youneed to create a directory and assign permissions for postgress process.
+You need to create a directory and assign permissions for postgress process.
+```bash
+cd /usr/local/pgsql/
+sudo mkdir model                // create model dir 
+sudo chown postgres model       // set postgres owner
+```
 Add to configuration file: postgresql.conf
 ```js
 
