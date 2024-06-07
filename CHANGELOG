@@ -1,0 +1,4 @@
+0.4 added ml_json_feature_info()
+0.5 added ml_predict_query() , rename ml_json_feature_info() function to ml_json_info() 
+0.6 added testing script test.py
+0.7 support libcatboostmodel 2.5.5  added the text features, delete the ml_json_info() function , deprecated  ml_predict() function;  

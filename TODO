@@ -1,4 +1,4 @@
-1) to delete all WARNINGs of compilation
-2) to make the regression model
-3) code refactoring
-
+1) code refactoring
+2) check text features
+3) boston dataset tests
+4) ranking model tests
