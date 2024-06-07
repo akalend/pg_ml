@@ -1,8 +1,8 @@
 CREATE EXTENSION ml;
 SELECT ml_version();
-    ml_version    
-------------------
- PgCatBoost 0.6.0
+               ml_version                
+-----------------------------------------
+ PgCatBoost 0.7.0 libcatboostmodel 1.2.5
 (1 row)
 
 SHOW ml.model_path;
@@ -12,23 +12,30 @@ SHOW ml.model_path;
 (1 row)
 
 SELECT ml_info('astra3.cbm');
-                                   ml_info                                    
-------------------------------------------------------------------------------
- dimension:3 numeric features:12 categorial features:0 modelType "MultiClass"+
+                                           ml_info                                            
+----------------------------------------------------------------------------------------------
+ dimension:3 numeric features:12 categorial features:0 text features:0 modelType "MultiClass"+
  fieldName:alpha,delta,u,g,r,i,z,cam_col,redshift,plate,MJD,fiber_ID 
 (1 row)
 
 SELECT ml_info('titanic.cbm');
-                                      ml_info                                      
------------------------------------------------------------------------------------
- dimension:1 numeric features:2 categorial features:9 modelType "Logloss"         +
+                                         ml_info                                          
+------------------------------------------------------------------------------------------
+ dimension:1 numeric features:2 categorial features:9 text features:0 modelType "Logloss"+
  fieldName:PassengerId,Pclass,Name,Sex,Age,SibSp,Parch,Ticket,Fare,Cabin,Embarked 
 (1 row)
 
 SELECT ml_info('adult.cbm');
                                                                              ml_info                                                                             
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------
- dimension:1 numeric features:6 categorial features:8 modelType "Logloss"                                                                                       +
+ dimension:1 numeric features:6 categorial features:8 text features:0 modelType "Logloss"                                                                       +
  fieldName:age,workclass,fnlwgt,education,education-num,marital-status,occupation,relationship,race,sex,capital-gain,capital-loss,hours-per-week,native-country 
+(1 row)
+
+SELECT ml_info('rating_txt.cbm');
+                                                                             ml_info                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ dimension:11 numeric features:5 categorial features:6 text features:5 modelType "MultiClass"                                                                   +
+ fieldName:synopsis,rating_MPAA,genre,director,writer,box_office,runtime,studio,dvd_date_int,theater_date_int,review,fresh,critic,top_critic,publisher,date_int 
 (1 row)
 

@@ -3,7 +3,16 @@
 # Machine learning module 
 ![pg_ml](/docs/pg_ml.png)
 
-all ideas send to author akalend dog mail dot ru, please.
+all ideas send to author akalend at mail dot ru, please.
+
+The libcatboostmodel must be 1.2.5 version.
+```
+    select ml_version();
+                  ml_version                
+   -----------------------------------------
+    PgCatBoost 0.7.0 libcatboostmodel 1.2.5
+   (1 row)
+```
 
 ## folders
 [docs](https://github.com/akalend/pg_ml/tree/main/dcos) - documentation in slides:
@@ -31,6 +40,7 @@ The prediction has so far been made  for:
  - multi classification   dataset:(astra)
  - regression             dataset:(boston)  
  - ranking                dataset:(MSRank)
+ - text classification    dataset:(tomates)
 
 ## Installation
 
@@ -100,32 +110,31 @@ Information about model:
 SELECT ml_info('amazon.cbm');
                                                         ml_info                                                         
 ------------------------------------------------------------------------------------------------------------------------
- dimension:1 numeric features:0 categorial features:9 modelType "Logloss"                                              +
+ dimension:1 numeric features:0 categorial features:9 text features:0 modelType "Logloss"                                              +
  fieldName:RESOURCE,MGR_ID,ROLE_ROLLUP_1,ROLE_ROLLUP_2,ROLE_DEPTNAME,ROLE_TITLE,ROLE_FAMILY_DESC,ROLE_FAMILY,ROLE_CODE 
 (1 row)
 
 SELECT ml_info('titanic.cbm');
                                       ml_info                                      
 -----------------------------------------------------------------------------------
- dimension:1 numeric features:2 categorial features:9 modelType "Logloss"         +
+ dimension:1 numeric features:2 categorial features:9 text features:0 modelType "Logloss"+
  fieldName:PassengerId,Pclass,Name,Sex,Age,SibSp,Parch,Ticket,Fare,Cabin,Embarked 
 (1 row)
 
---- If You save train model as json format
-SELECT * FROM  ml_json_info('titanic.json') ;
-   feature   | type  
--------------+-------
- Pclass      | text
- PassengerId | text
- Cabin       | text
- Embarked    | text
- Ticket      | text
+adult=# SELECT * from ml_model_features('titanic.cbm');
+   feature   |    type     
+-------------+-------------
+ PassengerId | categorical
+ Pclass      | categorical
+ Name        | categorical
+ Sex         | categorical
  Age         | float
- Name        | text
- Parch       | text
- SibSp       | text
- Sex         | text
+ SibSp       | categorical
+ Parch       | categorical
+ Ticket      | categorical
  Fare        | float
+ Cabin       | categorical
+ Embarked    | categorical
 (11 rows)
 
 ```
@@ -182,7 +191,37 @@ WITH  predict  AS (  SELECT * from ml_cat_predict('astra3.cbm', 'astra'))
    5 |  182.713733094955 |   51.3758050594777 | 22.44608 | 21.68444 | 20.24292 | 19.41423 | 19.08227 |   2830 |       1 |      411 |  7.516725588574623e+18 |     0.5026683 |  6676 | 56389 |      792 |       5 | 0.9843734017027631 | GALAXY
 
 
+SELECT * FROM  
+    ml_text_predict('rating_txt.cbm','rating_txt',
+    '{rating_MPAA,studio,fresh,critic,top_critic,publisher}',
+    '{synopsis,genre,director,writer,review}',
+    'genre') LIMIT 5;
+                                       index                                       |       predict       | class 
+-----------------------------------------------------------------------------------+---------------------+-------
+ Art House and International | Comedy | Drama | Romance | Gay and Lesbian          |  0.4144872023733149 | 8
+ Action and Adventure | Art House and International | Drama | Mystery and Suspense |  0.4200685327045952 | 6
+ Documentary | Special Interest                                                    |  0.3509596414961944 | 5
+ Comedy | Romance                                                                  | 0.41667281692024527 | 6
+ Drama                                                                             |  0.5146539749912098 | 6
+ (5 rows)
 
+WITH  predict AS ( 
+    SELECT   index::int AS id,  class  FROM  ml_text_predict('rating_txt.cbm','rating_txt','{rating_MPAA,studio,fresh,critic,top_critic,publisher}', 
+        '{synopsis,genre,director,writer,review}',
+        'id'
+    )
+ ) 
+SELECT p.id, class, rating_10  from predict p  , rating_txt t 
+    WHERE p.id = t.id 
+    LIMIT 5;
+  id  | class | rating_10 
+------+-------+-----------
+  830 | 8     |         8
+ 1161 | 6     |         6
+  596 | 5     |         6
+ 1585 | 6     |         9
+  603 | 6     |         6
+(5 rows)
 ```
 
 ## Before compilation
@@ -196,12 +235,9 @@ More detail information You can see in the docs/pg_ml.pdf
 
 ## Testing
 ```
-./test.py 
-============== removing existing temp instance        ==============
-============== creating temporary instance            ==============
-============== initializing database system           ==============
+ python3 test.py 
 ============== starting postmaster                    ==============
-running on port 51697 with PID 54101
+running on port 51697 with PID 22569
 ============== creating database "contrib_regression" ==============
 CREATE DATABASE
 ALTER DATABASE
@@ -211,15 +247,16 @@ ALTER DATABASE
 ALTER DATABASE
 ALTER DATABASE
 ============== running regression test queries        ==============
-test ml                           ... ok           19 ms
-test init                         ... ok            8 ms
-test predict                      ... ok           49 ms
-test titanic                      ... ok           32 ms
-test json                         ... ok         4531 ms
+test ml                           ... ok          210 ms
+test init                         ... ok           45 ms
+test astra                        ... ok          165 ms
+test titanic                      ... ok          150 ms
+test text                         ... ok          183 ms
 ============== shutting down postmaster               ==============
 ============== removing temporary instance            ==============
 
 =====================
  All 5 tests passed. 
 =====================
+
 ```

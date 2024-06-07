@@ -38,3 +38,33 @@ CREATE TABLE public.titanic (
 
 COPY titanic FROM '/tmp/model/titanic.csv' HEADER CSV; 
 SELECT * FROM titanic LIMIT 2;
+
+CREATE TABLE public.rating_txt(
+    id double precision,
+    synopsis text,
+    rating_mpaa text,
+    genre text,
+    director text,
+    writer text,
+    theater_date text,
+    dvd_date text,
+    box_office double precision,
+    runtime double precision,
+    studio text,
+    dvd_date_int bigint,
+    theater_date_int bigint,
+    review text,
+    rating double precision,
+    fresh text,
+    critic text,
+    top_critic bigint,
+    publisher text,
+    date text,
+    date_int double precision,
+    rating_10 double precision
+);
+
+
+COPY rating_txt FROM '/tmp/model/rating_txt.csv' HEADER CSV; 
+SELECT rating_10,critic,box_office FROM rating_txt LIMIT 4;
+

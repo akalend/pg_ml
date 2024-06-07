@@ -1,0 +1,23 @@
+SELECT * FROM  
+	ml_text_predict('rating_txt.cbm','rating_txt',
+	'{rating_MPAA,studio,fresh,critic,top_critic,publisher}',
+	'{synopsis,genre,director,writer,review}',
+	'genre');
+                                       index                                       |       predict       | class 
+-----------------------------------------------------------------------------------+---------------------+-------
+ Art House and International | Comedy | Drama | Romance | Gay and Lesbian          |  0.4144872023733149 | 8
+ Action and Adventure | Art House and International | Drama | Mystery and Suspense |  0.4200685327045952 | 6
+ Documentary | Special Interest                                                    |  0.3509596414961944 | 5
+ Comedy | Romance                                                                  | 0.41667281692024527 | 6
+ Drama                                                                             |  0.5146539749912098 | 6
+ Comedy | Science Fiction and Fantasy                                              |  0.5207836238793899 | 8
+ Comedy | Drama                                                                    |  0.5445310638477543 | 8
+ Comedy | Drama                                                                    |  0.4743317083132754 | 8
+ Comedy | Drama | Romance                                                          | 0.34020308288305284 | 4
+ Classics | Drama | Mystery and Suspense                                           |  0.3621289562314048 | 6
+(10 rows)
+
+-- SELECT * FROM  
+-- 	ml_text_predict_query ('rating_txt.cbm','SELECT * FROM rating_txt',
+-- 	'{rating_MPAA,studio,fresh,critic,top_critic,publisher}',
+-- 	'{synopsis,genre,director,writer,review}');

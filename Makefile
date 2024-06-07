@@ -8,11 +8,11 @@ PG_CPPFLAGS = -I$(libpq_srcdir) -ggdb
 SHLIB_LINK_INTERNAL = $(libpq) -lcatboostmodel -lc -lm -pthread
 
 EXTENSION = ml
-DATA = ml--0.6.sql 
+DATA = ml--0.7.sql
 PGFILEDESC = "ml - prediction data in ml model"
 
 REGRESS = ml init
-REGRESS_OPTS = --dlpath=$(top_builddir)/src/test/regress 
+REGRESS_OPTS = --dlpath=$(top_builddir)/src/test/regress
 
 
 ifdef USE_PGXS

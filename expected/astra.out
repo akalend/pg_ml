@@ -1,4 +1,5 @@
 SELECT ml_predict_table('astra3.cbm', 'astra');
+WARNING:  This function is depricated
 NOTICE:  table "astra_predict" does not exist, skipping
    ml_predict_table   
 ----------------------

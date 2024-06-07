@@ -10,6 +10,8 @@
  *  select  json_array_elements((j #> '{features_info,float_features}')::json) #> '{feature_id}'     from parms  WHERE name='astra_all';
      SELECT name, j #> '{data_processing_options,class_names}' classes, j #>'{loss_function,type}' as loss  FROM parms ;
 
+    При ранжировании вычисляем кол-во уникальных градаций, и при выходе - делим кол-во на градаций.
+
  */
 #include <errno.h>
 #include <limits.h>
@@ -35,13 +37,24 @@
 #include "utils/jsonfuncs.h"
 
 
-#define ML_VERSION "PgCatBoost 0.6.0"
-#define FIELDLEN    64
-#define PAGESIZE    8192
-#define QNaN        0x7fffffff
-#define MAXDIGIT    12
+#define ML_VERSION "PgCatBoost 0.7.0"
+
+#define FEATURES_BUFSIZE    1024
+#define FIELDLEN            64
+#define TXT_FIELDLEN        1024
+#define PAGESIZE            8192
+#define QNaN                0x7fffffff
+#define MAXDIGIT            12
+#define FAIL                -1
 
 #define ModelGetFieldName(i)  model->spi_tupdesc->attrs[i].attname.data
+
+enum FeatureType {
+    FT_UNDEF,
+    FT_FLOAT,
+    FT_CATEGORICAL,
+    FT_TEXT
+};
 
 typedef struct ArrayDatum {
     int count;
@@ -57,17 +70,21 @@ typedef struct MLmodelData
     int8               *iscategory;
     float              *row_fvalues;
     char*              *row_cvalues;
+    char*              *row_tvalues;
     char*               cat_value_buffer;
+    char*               txt_value_buffer;
     double             *result_pa;
     double             *result_exp;
     char*               keyField;
     char*               modelType;
     int64               current;
-    int                 cat_count;
-    int                 num_count;
-    int                 attCount;
-    int                 dimension;
+    size_t              cat_count;
+    size_t              num_count;
+    size_t              txt_count;
+    size_t              attCount;
+    size_t              dimension;
     ArrayDatum          cat_fields;
+    ArrayDatum          text_fields;
 } MLmodelData;
 
 #define MLmodel MLmodelData*
@@ -78,7 +95,18 @@ typedef struct SpiData
     TupleDesc           tuple_desc;
     int                 current;
 } SpiData;
+
 #define SpiInfo SpiData*
+
+typedef struct FeatureData
+{
+    int                 current;
+    char                **features;
+    uint8               *types;
+    TupleDesc           tuple_desc;
+} FeatureData;
+
+#define FeatureInfo FeatureData*
 
 
 static char* model_path = "";
@@ -105,7 +133,7 @@ static Datum FeatureTypeGetDatum(char* featureName, char* featureType,
                     TupleDesc tupleDescriptor);
 
 static bool check_model_path(char **newval, void **extra, GucSource source);
-
+static void getPgArray(ArrayType  *key_array, ArrayDatum *fields);
 
 void _PG_init(void);
 
@@ -115,11 +143,11 @@ PG_MODULE_MAGIC;
 PG_FUNCTION_INFO_V1(ml_version);
 PG_FUNCTION_INFO_V1(ml_predict);
 PG_FUNCTION_INFO_V1(ml_cat_predict);
-PG_FUNCTION_INFO_V1(ml_test);
 PG_FUNCTION_INFO_V1(ml_info);
-PG_FUNCTION_INFO_V1(ml_json_parms_info);
+PG_FUNCTION_INFO_V1(ml_model_features);
 
 PG_FUNCTION_INFO_V1(ml_predict_dataset_inner);
+PG_FUNCTION_INFO_V1(ml_predict_text_dataset_inner);
 
 
 static double
@@ -131,7 +159,16 @@ sigmoid(double x) {
 Datum
 ml_version(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_TEXT_P(cstring_to_text(ML_VERSION));
+    StringInfoData buf;
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf,
+        ML_VERSION" libcatboostmodel %d.%d.%d",
+        CATBOOST_APPLIER_MAJOR,
+        CATBOOST_APPLIER_MINOR,
+        CATBOOST_APPLIER_FIX
+    );
+    PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
 
 
@@ -242,14 +279,15 @@ LoadModel(text  *filename, ModelCalcerHandle** modelHandle)
     }
 
 
-    if (stat(filename_str, &buf) == -1)
+    if (stat(filename_str, &buf) == FAIL)
     {
         int         err = errno;
         elog(ERROR, "file %s has error: %d:%s",filename_str, err, strerror(err));
     }
 
     *modelHandle = ModelCalcerCreate();
-    if (!LoadFullModelFromFile(*modelHandle, filename_str)) {
+    if (!LoadFullModelFromFile(*modelHandle, filename_str))
+    {
         elog(ERROR, "LoadFullModelFromFile error message: %s\n", GetErrorString());
     }
     resetStringInfo(&sbuf);
@@ -262,11 +300,12 @@ LoadModel(text  *filename, ModelCalcerHandle** modelHandle)
 static char** 
 GetModelFeatures(ModelCalcerHandle *modelHandle, size_t *featureCount)
 {
-    char** featureName = palloc(1024);
+    char** featureName = palloc(FEATURES_BUFSIZE);
 
     bool rc = GetModelUsedFeaturesNames(modelHandle, &featureName, featureCount);
 
-    if (!rc) {
+    if (!rc)
+    {
         elog(ERROR,"get model feature name error");
     }
     return featureName;
@@ -371,12 +410,12 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
     SPITupleTable *spi_tuptable;
     TupleDesc   spi_tupdesc;
     int i, j, res, rows;
-    int cat_feature_counter = 0;
-    int feature_counter = 0;
     int *iscategory;
-    int model_float_feature_count;
-    int model_cat_feature_count ;
-    int model_dimension;
+    size_t cat_feature_counter = 0;
+    size_t feature_counter = 0;
+    size_t model_float_feature_count;
+    size_t model_cat_feature_count ;
+    size_t model_dimension;
     size_t featureCount = 0;
     char **features;
     float *row_fvalues;
@@ -409,13 +448,13 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
     spi_tupdesc = spi_tuptable->tupdesc;
 
     iscategory = palloc( spi_tupdesc->natts * sizeof(int));
-    model_float_feature_count = (int)GetFloatFeaturesCount(modelHandle);
-    model_cat_feature_count = (int)GetCatFeaturesCount(modelHandle);
-    model_dimension = (int)GetDimensionsCount(modelHandle);
+    model_float_feature_count = (size_t)GetFloatFeaturesCount(modelHandle);
+    model_cat_feature_count = (size_t)GetCatFeaturesCount(modelHandle);
+    model_dimension = (size_t)GetDimensionsCount(modelHandle);
+
 
 
     features = GetModelFeatures(modelHandle, &featureCount);
-
     fieldCount = isMultiClass ? spi_tupdesc->natts -1 : spi_tupdesc->natts;
 
     for(i=1; i < fieldCount; i++)
@@ -445,7 +484,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
     {
         DropPredictTable(tabname);
         elog(ERROR,
-            "count of numeric features is not valid, must be %d is %d",
+            "count of numeric features is not valid, must be %ld is %ld",
             model_float_feature_count, feature_counter
         );
         return;
@@ -455,7 +494,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
     {
         DropPredictTable(tabname);
         elog(ERROR,
-            "count of categocical features is not valid, must be %d is %d",
+            "count of categocical features is not valid, must be %ld is %ld",
             model_cat_feature_count, cat_feature_counter
         );
         return;
@@ -497,7 +536,7 @@ predict(ModelCalcerHandle* modelHandle, char* tabname,
                     res  = sscanf(value, "%f", &row_fvalues[feature_counter]);
                     if(res < 1)
                     {
-                        elog(WARNING,"error input j/cnt=%d/%d\n", j, feature_counter);
+                        elog(WARNING,"error input j/cnt=%d/%ld\n", j, feature_counter);
                     }
                 }
 
@@ -611,6 +650,7 @@ ml_cat_predict(PG_FUNCTION_ARGS)
     text *filename = PG_GETARG_TEXT_PP(0);
     char *tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
 
+    elog(WARNING, "This function is depricated");
 
     // ------------- get categorical features  ----------------
     key_array = PG_GETARG_ARRAYTYPE_P(2);
@@ -653,7 +693,6 @@ ml_cat_predict(PG_FUNCTION_ARGS)
 }
 
 
-
 Datum
 ml_predict(PG_FUNCTION_ARGS)
 {
@@ -666,6 +705,7 @@ ml_predict(PG_FUNCTION_ARGS)
     char *tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
     char* modelType;
 
+    elog(WARNING, "This function is depricated");
     LoadModel(filename, &modelHandle);
 
     model_info = getModelParms(modelHandle);
@@ -706,13 +746,13 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
         // SPITupleTable   *spi_tuptable;
         const char*     model_info;
         const int resultColumnCount = 3;
-        int             model_float_feature_count;
-        int             model_cat_feature_count ;
-        int             model_dimension;
+        size_t          model_float_feature_count;
+        size_t          model_cat_feature_count ;
+        size_t          model_dimension;
         size_t          featureCount = 0;
         char            **features;
-        int             cat_feature_counter=0;
-        int             feature_counter=0;
+        size_t          cat_feature_counter=0;
+        size_t          feature_counter=0;
         int             i;
         MLmodel         model;
         text            *filename;
@@ -736,24 +776,7 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
 
         if (!PG_ARGISNULL(2))
         {
-
-            int         key_count;
-            Datum      *key_datums;
-            bool       *key_nulls;
-            ArrayType  *key_array = PG_GETARG_ARRAYTYPE_P(2);
-
-            if (key_array == NULL) {
-                elog(ERROR, "key is null");
-            }
-
-            Assert(ARR_ELEMTYPE(key_array) == TEXTOID);
-
-            deconstruct_array(key_array,
-                              TEXTOID, -1, false, TYPALIGN_INT,
-                              &key_datums, &key_nulls, &key_count);
-
-            cat_fields.elements = key_datums;
-            cat_fields.count = key_count;
+            getPgArray(PG_GETARG_ARRAYTYPE_P(2), &cat_fields);
         }
 
         key_field = text_to_cstring(PG_GETARG_TEXT_PP(3));
@@ -791,9 +814,9 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
 
 
         model->iscategory = palloc0( model->attCount * sizeof(int8));
-        model_float_feature_count = (int)GetFloatFeaturesCount(model->modelHandle);
-        model_cat_feature_count = (int)GetCatFeaturesCount(model->modelHandle);
-        model_dimension = (int)GetDimensionsCount(model->modelHandle);
+        model_float_feature_count = (size_t)GetFloatFeaturesCount(model->modelHandle);
+        model_cat_feature_count = (size_t)GetCatFeaturesCount(model->modelHandle);
+        model_dimension = (size_t)GetDimensionsCount(model->modelHandle);
 
 
         features = GetModelFeatures(model->modelHandle, &featureCount);
@@ -822,7 +845,7 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
         if (feature_counter != model_float_feature_count)
         {
             elog(ERROR,
-                "count of numeric features is not valid, must be %d is %d",
+                "count of numeric features is not valid, must be %ld is %ld",
                 model_float_feature_count, feature_counter
             );
         }
@@ -830,7 +853,7 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
         if (cat_feature_counter != model_cat_feature_count)
         {
             elog(ERROR,
-                "count of categocical features is not valid, must be %d is %d",
+                "count of categocical features is not valid, must be %ld is %ld",
                 model_cat_feature_count, cat_feature_counter
             );
         }
@@ -879,7 +902,7 @@ ml_predict_dataset_inner(PG_FUNCTION_ARGS)
 
 
         model->row_fvalues = palloc0( model->num_count * sizeof(float));
-        p = model->cat_value_buffer  = palloc0(memsize);
+        p = model->cat_value_buffer  = palloc0(memsize );
         model->row_cvalues = palloc0(model->cat_count * sizeof(char*));
 
         model->result_pa  = (double*) palloc( sizeof(double) * model->dimension);
@@ -1226,10 +1249,11 @@ ml_info(PG_FUNCTION_ARGS)
     initStringInfo(&buf);
 
     appendStringInfo(&buf,
-        "dimension:%ld numeric features:%ld categorial features:%ld",
+        "dimension:%ld numeric features:%ld categorial features:%ld text features:%ld",
         GetDimensionsCount(modelHandle),
         GetFloatFeaturesCount(modelHandle),
-        GetCatFeaturesCount(modelHandle));
+        GetCatFeaturesCount(modelHandle),
+        GetTextFeaturesCount(modelHandle));
 
     model_info = getModelParms(modelHandle);
 
@@ -1253,8 +1277,9 @@ ml_info(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(cstring_to_text(buf.data));
 }
 
+
 Datum
-ml_json_parms_info(PG_FUNCTION_ARGS)
+ml_model_features(PG_FUNCTION_ARGS)
 {
     FuncCallContext *functionContext = NULL;
 
@@ -1263,99 +1288,59 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
     {
         MemoryContext oldContext;
         TupleDesc tupleDescriptor;
-        StringInfoData sbuf;
-        StringInfoData query;
-        char *buf = NULL;
-        FILE *model = NULL;
-        const int resultColumnCount = 2;
-        int   err;
-        struct stat stat_info;
-        char slash[2] = "/\0";
-        int count_bytes = 0;
-        char *p;
-        int readed = 0;
-        const char  *filename_str = text_to_cstring(PG_GETARG_TEXT_PP(0));
-        int res;
-        SpiInfo info;
+
+        ModelCalcerHandle* modelHandle;
+        int resultColumnCount = 2;
+        int i;
+        char    **features;
+        size_t  count;
+        size_t  cat_count;
+        size_t  *cat_indices;
+        size_t  float_count;
+        size_t  *float_indices;
+        size_t  text_count;
+        size_t  *text_indices;
+
+        FeatureInfo info;
 
         /* create a function context for cross-call persistence */
         functionContext = SRF_FIRSTCALL_INIT();
 
-
         oldContext = MemoryContextSwitchTo(
             functionContext->multi_call_memory_ctx);
 
-        initStringInfo(&sbuf);
-        if (strstr(filename_str, slash) == NULL)
+        LoadModel(PG_GETARG_TEXT_PP(0), &modelHandle);
+
+        features = GetModelFeatures(modelHandle, &count);
+        if (count > 254)
         {
-            int len = strlen( model_path);
-            if (model_path[len-1] == '/')
-                appendStringInfo(&sbuf, "%s%s", model_path, filename_str);
-            else
-                appendStringInfo(&sbuf, "%s/%s", model_path, filename_str);
-
-            filename_str = sbuf.data;
+            elog(ERROR, "count features must be less 254 and used %ld", count);
         }
 
+        cat_count = GetCatFeaturesCount(modelHandle);
+        cat_indices = palloc0(sizeof(size_t) * cat_count);
 
-        if (stat(filename_str, &stat_info) == -1)
+        if (!GetCatFeatureIndices(modelHandle, &cat_indices, &cat_count))
         {
-            err = errno;
-            elog(ERROR, "file %s has error: %d:%s",filename_str, err, strerror(err));
+            elog(ERROR,"CatBoost error: %s", GetErrorString());
         }
 
-        if (stat_info.st_size < 16)
+        float_count = GetFloatFeaturesCount(modelHandle);
+        float_indices = palloc0(sizeof(size_t) * float_count);
+
+        if (!GetFloatFeatureIndices(modelHandle, &float_indices, &float_count))
         {
-            elog(ERROR, "file %s has very small size: %ld",filename_str,
-                stat_info.st_size);
+            elog(ERROR,"CatBoost error: %s", GetErrorString());
         }
 
-        model = fopen(filename_str, PG_BINARY_R);
-        if (model == NULL){
-            err = errno;
-            elog(ERROR, "Cannot open model file \"%s\": %s",
-                 filename_str, strerror(err));
-        }
+        text_count = GetTextFeaturesCount(modelHandle);
+        text_indices = palloc0(sizeof(size_t) * text_count);
 
-        buf = (char*)palloc0(stat_info.st_size+1);
-        if (!buf)
+        if (!GetTextFeatureIndices(modelHandle, &text_indices, &text_count))
         {
-            elog(ERROR, "the filesize %s is very big %ld", filename_str,
-                stat_info.st_size);
+            elog(ERROR,"CatBoost error: %s", GetErrorString());
         }
 
-        p = buf;
-        while (!feof(model)){
-            readed = fread(p, 1, PAGESIZE, model);
-            p += readed;
-            count_bytes += readed;
-        }
-
-        fclose(model);
-        if (count_bytes != stat_info.st_size)
-        {
-            err = errno;
-            elog(ERROR, "error readed len=%d/%ld from file \n%s", readed,
-                stat_info.st_size,strerror(err));
-        }
-
-
-
-        initStringInfo(&query);
-        appendStringInfo(&query,
-        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,categorical_features}')::json)"
-        " #>>'{feature_id}' name,'text' type  "
-        "UNION "
-        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,float_features}')::json)"
-        " #>>'{feature_id}' name,'float' type  ",
-        buf,buf);
-
-        SPI_connect();
-        res = SPI_exec(query.data, 0);
-        if (res < 1 || SPI_tuptable == NULL)
-        {
-            elog(ERROR, "Query json error" );
-        }
 
         /*
          * This tuple descriptor must match the output parameters declared for
@@ -1369,231 +1354,506 @@ ml_json_parms_info(PG_FUNCTION_ARGS)
 
         functionContext->tuple_desc =  BlessTupleDesc(tupleDescriptor);
 
-        info = (SpiInfo) palloc0(sizeof(SpiData));
-        info->tuple_table = SPI_tuptable;
-        info->tuple_desc =  info->tuple_table->tupdesc;
+        info = (FeatureInfo) palloc0(sizeof(FeatureData));
+        info->tuple_desc =  functionContext->tuple_desc;
         info->current = 0;
 
-        functionContext->max_calls = SPI_processed;
-        functionContext->user_fctx = info;
+        info->features = features;
+        info->types = palloc0(count);
 
+
+        for (i = 0; i < float_count; i++)
+        {
+            info->types[float_indices[i]] = FT_FLOAT;
+        }
+
+        for (i = 0; i < text_count; i++)
+        {
+            info->types[text_indices[i]] = FT_TEXT;
+        }
+
+        for (i = 0; i < cat_count; i++)
+        {
+            info->types[cat_indices[i]] = FT_CATEGORICAL;
+        }
+
+        functionContext->max_calls = count;
+        functionContext->user_fctx = info;
 
         MemoryContextSwitchTo(oldContext);
     }
 
     functionContext = SRF_PERCALL_SETUP();
 
-    if ( ((SpiInfo)functionContext->user_fctx)->current < functionContext->max_calls)
+    if ( ((FeatureInfo)functionContext->user_fctx)->current < functionContext->max_calls)
     {
-        SpiInfo jsonInfo = (SpiInfo)functionContext->user_fctx;
-        HeapTuple   spi_tuple = jsonInfo->tuple_table->vals[jsonInfo->current];
-        char *value = SPI_getvalue(spi_tuple, jsonInfo->tuple_desc, 1);
-        char *type = SPI_getvalue(spi_tuple, jsonInfo->tuple_desc, 2);
-        Datum   recordDatum = FeatureTypeGetDatum(value ,type,functionContext->tuple_desc);
-        jsonInfo->current ++;
+        char *type;
+        FeatureInfo info = (FeatureInfo)functionContext->user_fctx;
+        char* value = info->features[info->current];
+        Datum   recordDatum;
+
+        switch (info->types [info->current])
+        {
+            case FT_FLOAT:
+            {
+                type = pstrdup("float");
+                break;
+            }
+            case FT_TEXT:
+            {
+                type = pstrdup("text");
+                break;
+            }
+            case FT_CATEGORICAL:
+            {
+                type = pstrdup("categ");
+                break;
+            }
+
+            default: type = pstrdup("");
+        }
+
+        recordDatum = FeatureTypeGetDatum(value ,type,functionContext->tuple_desc);
+        info->current ++;
         SRF_RETURN_NEXT(functionContext, recordDatum);
     }
     else
     {
+        pfree(functionContext->user_fctx);
+        SRF_RETURN_DONE(functionContext);
+    }
+}
+
+
+static void
+getPgArray(ArrayType  *key_array, ArrayDatum *fields)
+{
+    int         key_count;
+    Datum      *key_datums;
+    bool       *key_nulls;
+     // = PG_GETARG_ARRAYTYPE_P(argNum);
+
+    if (key_array == NULL) {
+        elog(ERROR, "key is null");
+    }
+
+    Assert(ARR_ELEMTYPE(key_array) == TEXTOID);
+
+    deconstruct_array(key_array,
+                      TEXTOID, -1, false, TYPALIGN_INT,
+                      &key_datums, &key_nulls, &key_count);
+
+    (*fields).elements = key_datums;
+    (*fields).count = key_count;
+}
+
+
+Datum
+ml_predict_text_dataset_inner(PG_FUNCTION_ARGS)
+{
+    FuncCallContext *functionContext = NULL;
+
+    if (SRF_IS_FIRSTCALL())
+    {
+        MemoryContext oldContext;
+        TupleDesc tupleDescriptor;
+        ArrayDatum  cat_fields = {0, NULL};
+        ArrayDatum  text_fields = {0, NULL};
+        ModelCalcerHandle* modelHandle;
+        // SPITupleTable   *spi_tuptable;
+        const char*     model_info;
+        char            **features;
+        const int resultColumnCount = 3;
+        size_t          model_float_feature_count;
+        size_t          model_cat_feature_count ;
+        size_t          model_text_feature_count ;
+        size_t          model_dimension;
+        size_t          featureCount = 0;
+        size_t          cat_feature_counter=0;
+        size_t          feature_counter=0;
+        size_t          text_feature_counter=0;
+        int             i;
+        MLmodel         model;
+        text            *filename;
+        char            *key_field;
+        int             res;
+        bool            function_type = PG_GETARG_BOOL(5);
+
+        /* create a function context for cross-call persistence */
+        functionContext = SRF_FIRSTCALL_INIT();
+
+        filename = PG_GETARG_TEXT_PP(0);
+
+        LoadModel(filename, &modelHandle);
+
+        /* switch to memory context appropriate for multiple function calls */
+        oldContext = MemoryContextSwitchTo(
+            functionContext->multi_call_memory_ctx);
+
+
+        if (!PG_ARGISNULL(2))
+        {
+            getPgArray(PG_GETARG_ARRAYTYPE_P(2), &cat_fields);
+        }
+        if (!PG_ARGISNULL(3))
+        {
+            getPgArray(PG_GETARG_ARRAYTYPE_P(3), &text_fields);
+        }
+
+        key_field = text_to_cstring(PG_GETARG_TEXT_PP(4));
+
+        model = (MLmodel) palloc0(sizeof(MLmodelData));
+
+        model->modelHandle = modelHandle;
+        model_info = getModelParms(model->modelHandle);
+        SPI_connect();
+
+        model->modelType = getModelType(model->modelHandle, model_info);
+        model->modelClasses = getModelClasses(model->modelHandle, model_info);
+
+
+        if (key_field)
+            model->keyField = pstrdup(key_field);
+
+        if (function_type)
+        {
+            char  *query = text_to_cstring(PG_GETARG_TEXT_PP(1));
+            res = SPI_exec(query, 0);
+        }
+        else
+        {
+            char  *tabname = text_to_cstring(PG_GETARG_TEXT_PP(1));
+            StringInfoData buf;
+            initStringInfo(&buf);
+            appendStringInfo(&buf, "SELECT * FROM %s;", tabname);
+            res = SPI_exec(buf.data, 0);
+            pfree(buf.data);
+        }
+        if (res < 1 || SPI_tuptable == NULL)
+        {
+            elog(ERROR, "Query error");
+        }
+
+
+        model->cat_fields = cat_fields;
+        model->spi_tuptable = SPI_tuptable;
+        model->spi_tupdesc  = SPI_tuptable->tupdesc;
+        model->attCount = SPI_tuptable->tupdesc->natts;
+
+
+        model->iscategory = palloc0( model->attCount * sizeof(int8));
+        model_float_feature_count = (size_t)GetFloatFeaturesCount(model->modelHandle);
+        model_cat_feature_count = (size_t)GetCatFeaturesCount(model->modelHandle);
+        model_text_feature_count = (size_t)GetTextFeaturesCount(model->modelHandle);
+        model_dimension = (size_t)GetDimensionsCount(model->modelHandle);
+
+
+        features = GetModelFeatures(model->modelHandle, &featureCount);
+
+        for(i=0; i < model->attCount; i++)
+        {
+            
+            if(! checkInArray(ModelGetFieldName(i), features, featureCount))
+            {
+                model->iscategory[i] = FT_UNDEF;  // not in features
+                continue;
+            }
+
+            if ( checkInTextArray(ModelGetFieldName(i), &cat_fields) )
+            {
+                cat_feature_counter ++;
+                model->iscategory[i] = FT_CATEGORICAL;
+            }
+            else if (checkInTextArray(ModelGetFieldName(i), &text_fields))
+            {
+                text_feature_counter ++;
+                model->iscategory[i] = FT_TEXT;
+            }
+            else
+            {
+                feature_counter ++;
+                model->iscategory[i] = FT_FLOAT;
+            }
+        }
+
+         //  check model features
+        if (feature_counter != model_float_feature_count)
+        {
+            elog(ERROR,
+                "count of numeric features is not valid, must be %ld is %ld",
+                model_float_feature_count, feature_counter
+            );
+        }
+
+        if (cat_feature_counter != model_cat_feature_count)
+        {
+            elog(ERROR,
+                "count of categocical features is not valid, must be %ld is %ld",
+                model_cat_feature_count, cat_feature_counter
+            );
+        }
+
+        if (text_feature_counter != model_text_feature_count)
+        {
+            elog(ERROR,
+                "count of text features is not valid, must be %ld is %ld",
+                text_feature_counter, model_text_feature_count
+            );
+        }
+
+
+        model->current = 0;
+        functionContext->user_fctx = model;
+        functionContext->max_calls = SPI_processed;
+        model->dimension = model_dimension;
+        model->cat_count = cat_feature_counter;
+        model->num_count = feature_counter;
+        model->txt_count = text_feature_counter;
+
+
+        /*
+         * This tuple descriptor must match the output parameters declared for
+         * the function in pg_proc.
+         */
+        tupleDescriptor = CreateTemplateTupleDesc(resultColumnCount);
+        TupleDescInitEntry(tupleDescriptor, (AttrNumber) 1, key_field,
+                           TEXTOID, -1, 0);
+        TupleDescInitEntry(tupleDescriptor, (AttrNumber) 2, "predict",
+                           FLOAT8OID, -1, 0);
+        TupleDescInitEntry(tupleDescriptor, (AttrNumber) 3, "class",
+                           TEXTOID, -1, 0);
+
+        functionContext->tuple_desc =  BlessTupleDesc(tupleDescriptor);
+
+        MemoryContextSwitchTo(oldContext);
+    }
+
+    functionContext = SRF_PERCALL_SETUP();
+
+    if (  ((MLmodel) functionContext->user_fctx)->current < functionContext->max_calls)
+    {
+        char*   class;
+        int     feature_counter = 0;
+        int     cat_feature_counter = 0;
+        int     text_feature_counter = 0;
+        MLmodel model = (MLmodel)functionContext->user_fctx;
+        Datum   recordDatum;
+        int j;
+        char *p;
+        char *p2;
+        char* yes = "yes";
+        char* no = "no";
+        HeapTuple   spi_tuple = ((MLmodel)functionContext->user_fctx)->spi_tuptable->vals[((MLmodel)functionContext->user_fctx)->current];
+        char* key_field_value = NULL;
+
+
+        model->row_fvalues = palloc0( model->num_count * sizeof(float));
+        p  = model->cat_value_buffer  = palloc0(model->cat_count * sizeof(char) * FIELDLEN);
+        p2 = model->txt_value_buffer  = palloc0(model->txt_count * sizeof(char) * TXT_FIELDLEN);
+
+        model->row_cvalues = palloc0(model->cat_count * sizeof(char*));
+        model->row_tvalues = palloc0(model->txt_count * sizeof(char*));
+
+
+        model->result_pa  = (double*) palloc( sizeof(double) * model->dimension);
+        model->result_exp = (double*) palloc( sizeof(double) * model->dimension);
+
+
+        for(j=0; j < model->attCount; j++)
+        {
+            char    *value;
+            value = SPI_getvalue(spi_tuple, model-> spi_tupdesc, j+1);
+
+            if (strcmp(model->keyField,  ModelGetFieldName(j)) == 0)
+            {
+                key_field_value = value;
+            }
+
+            if( model->iscategory[j] == FT_UNDEF) // not in features
+                continue;
+
+            if( model->iscategory[j] == FT_FLOAT)
+            {
+                if (value == 0 )
+                {
+                    model->row_fvalues[feature_counter] = QNaN;
+                }
+                else
+                {
+                    int res;
+                    res  = sscanf(value, "%f", &model->row_fvalues[feature_counter]);
+                    if(res < 1)
+                    {
+                        elog(WARNING,"error input j/cnt=%d/%d %f\n", j,
+                            feature_counter, model->row_fvalues[feature_counter]);
+                    }
+                }
+
+                feature_counter++;
+            }
+
+            if( model->iscategory[j] == FT_CATEGORICAL)
+            {
+                if (!value)
+                {
+                    model->row_cvalues[cat_feature_counter] = pstrdup("");
+                    p += 1;
+                }
+                else
+                {
+                    model->row_cvalues[cat_feature_counter] = strcpy(p, value);
+                    p += strlen(value);
+                }
+                cat_feature_counter++;
+                *p = '\0';
+                p++;
+            }
+
+            if( model->iscategory[j] == FT_TEXT)
+            {
+                if (!value)
+                {
+                    model->row_tvalues[text_feature_counter] = pstrdup("");
+                    // *(model->row_tvalues[text_feature_counter]) = '\0';
+                    p2 += 1;
+                }
+                else
+                {
+                    model->row_tvalues[text_feature_counter] = strcpy(p, value);
+                    p2 += strlen(value);
+                }
+                text_feature_counter++;
+                *p2 = '\0';
+                p2++;
+
+                //  сделать сравнение на длинну буфера
+            }
+        } // column
+
+
+        if (!CalcModelPredictionText(model->modelHandle,
+                    1,
+                    (const float**)&model->row_fvalues, feature_counter,
+                    (const char*** )&model->row_cvalues, cat_feature_counter,
+                    (const char*** )&model->row_tvalues, text_feature_counter,
+                    (double*)model->result_pa, model->dimension)
+            )
+        {
+            StringInfoData str;
+            initStringInfo(&str);
+            for(j = 0; j < feature_counter; j++)
+            {
+                appendStringInfo(&str, "%f,", model->row_fvalues[j]);
+            }
+            elog( ERROR, "CalcModelPrediction error message: %s \nrow num=%ld",
+                    GetErrorString(),  model->current );
+        }
+
+        if (strncmp("\"MultiClass\"", model->modelType, 12) == 0)
+        {
+            char  ***p;
+            double max = 0., sm = 0.;
+            int max_i = -1;
+            char* out = model->keyField;
+
+            for( j = 0; j < model->dimension; j ++)
+            {
+                model->result_exp[j] = exp(model->result_pa[j]);
+                sm += model->result_exp[j];
+            }
+            for( j = 0; j < model->dimension; j ++)
+            {
+                model->result_exp[j] = model->result_exp[j] / sm;
+                if (model->result_exp[j] > max){
+                    max = model->result_exp[j];
+                    max_i = j;
+                }
+            }
+
+            p = model->modelClasses + max_i;
+
+            if (key_field_value)
+            {
+                out = key_field_value;
+            }
+
+            recordDatum = PredictGetDatum(out, model->current, max, (char*)*p,
+                            functionContext->tuple_desc);
+
+        }
+        else if (strcmp(model->modelType, "\"RMSE\"") == 0)
+        {
+            char* out = "";
+
+            if (key_field_value)
+            {
+                out = key_field_value;
+            }
+            recordDatum = PredictGetDatum(out, model->current, model->result_pa[0], NULL,
+                            functionContext->tuple_desc);
+
+        }
+        else if (strncmp("\"Logloss\"", model->modelType, 9) == 0)
+        {
+            double probability = sigmoid(model->result_pa[0]);
+            char* out = model->keyField;
+            int n = 0;
+            if (probability > 0.5)
+            {
+                n = 1;
+            }
+
+            if (key_field_value)
+            {
+                out = key_field_value;
+            }
+            recordDatum = PredictGetDatum(out, model->current, probability,
+                            (char*)*(model->modelClasses + n),
+                            functionContext->tuple_desc);
+        }
+        else
+        {
+            double probability = sigmoid(model->result_pa[0]);
+            char* out = model->keyField;
+            if (probability > 0.5)
+            {
+                class=yes;
+            }
+            else
+            {
+                class=no;
+            }
+
+            if (key_field_value)
+            {
+                out = key_field_value;
+            }
+
+            recordDatum = PredictGetDatum(out, model->current,
+                                          probability, class,
+                                          functionContext->tuple_desc);
+
+        }
+
+
+        ((MLmodel) functionContext->user_fctx)->current++;
+
+        pfree(model->row_fvalues);
+        pfree(model->cat_value_buffer);
+
+        SRF_RETURN_NEXT(functionContext, recordDatum);
+    }
+    else
+    {
+        MLmodel model = (MLmodel)functionContext->user_fctx;
+        pfree(model->keyField);
+
         if (SPI_finish() != SPI_OK_FINISH)
             elog(WARNING, "could not finish SPI");
 
         SRF_RETURN_DONE(functionContext);
     }
-
-
 }
-
-Datum ml_json_parms_info_old(PG_FUNCTION_ARGS);
-
-Datum
-ml_json_parms_info_old(PG_FUNCTION_ARGS)
-{
-    MemoryContext oldcontext;
-    MemoryContext ml_context;
-    FILE *model = NULL;
-    struct stat stat_info;
-    char *buf = NULL;
-    size_t readed = 0;
-    size_t count_bytes = 0;
-    char  *p;
-    int   err;
-    StringInfoData query;
-    StringInfoData out;
-    char *out2;
-    TupleDesc tupdesc;
-    SPITupleTable *tuptable;
-    int ret, i;
-    StringInfoData sbuf;
-    char slash[2] = "/\0";    
-
-    const char  *filename_str = text_to_cstring(PG_GETARG_TEXT_PP(0));
-    ml_context = AllocSetContextCreate(CurrentMemoryContext,
-                                       "ml",
-                                       ALLOCSET_SMALL_MINSIZE,        // 0
-                                       ALLOCSET_SMALL_INITSIZE,       // 1K
-                                       (ALLOCSET_DEFAULT_MAXSIZE * 2)); // 8K -> 8M
-    oldcontext = MemoryContextSwitchTo(ml_context);
-
-
-    initStringInfo(&sbuf);
-    if (strstr(filename_str, slash) == NULL)
-    {
-        int len = strlen( model_path);
-        if (model_path[len-1] == '/')
-            appendStringInfo(&sbuf, "%s%s", model_path, filename_str);
-        else
-            appendStringInfo(&sbuf, "%s/%s", model_path, filename_str);
-
-        filename_str = sbuf.data;
-    }
-
-
-    if (stat(filename_str, &stat_info) == -1)
-    {
-        err = errno;
-        elog(ERROR, "file %s has error: %d:%s",filename_str, err, strerror(err));
-    }
-
-    if (stat_info.st_size < 16)
-    {
-        elog(ERROR, "file %s has very small size: %ld",filename_str,
-            stat_info.st_size);
-    }
-
-    model = fopen(filename_str, PG_BINARY_R);
-    if (model == NULL){
-        err = errno;
-        elog(ERROR, "Cannot open model file \"%s\": %s",
-             filename_str, strerror(err));
-    }
-
-    buf = (char*)palloc0(stat_info.st_size+1);
-    if (!buf)
-    {
-        elog(ERROR, "the filesize %s is very big %ld", filename_str,
-            stat_info.st_size);
-    }
-
-    p = buf;
-    while (!feof(model)){
-        readed = fread(p, 1, PAGESIZE, model);
-        p += readed;
-        count_bytes += readed;
-    }
-
-    fclose(model);
-    if (count_bytes != stat_info.st_size)
-    {
-        err = errno;
-        elog(ERROR, "error readed len=%ld/%ld from file \n%s", readed,
-            stat_info.st_size,strerror(err));
-    }
-
-
-    initStringInfo(&query);
-    appendStringInfo(&query,
-        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,float_features}')::json)"
-        " #>> '{feature_id}'", buf);
-
-    tuptable = SPI_tuptable;
-    SPI_connect();
-    ret = SPI_exec(query.data, 0);
-    tuptable = SPI_tuptable;
-
-    if (ret < 1 || tuptable == NULL)
-    {
-        elog(ERROR, "Query errorcode=%d", ret);
-    }
-
-    tuptable = SPI_tuptable;
-    if (tuptable == NULL)
-        elog(ERROR,"tuptable is null");
-
-    initStringInfo(&out);
-    if (SPI_processed > 0)
-    {
-        tupdesc = tuptable->tupdesc;
-
-        appendStringInfo(&out,"float feature:");
-        for (i = 0; i < SPI_processed; i++)
-        {
-            char *val = SPI_getvalue(tuptable->vals[i], tupdesc, 1);
-            appendStringInfo(&out, "%s,", val);
-            pfree(val);
-            
-        }
-        p = out.data + out.len - 1;
-    }
-    else
-    {
-        appendStringInfo(&out,"none float feature\n");
-    }
-
-
-    elog(WARNING, "----->%s", out.data);
-    out2 = pnstrdup(out.data, out.len-1);
-    elog(WARNING, "=====>%s", out2);
-
-
-    SPI_finish();
-    SPI_connect();
-    resetStringInfo(&query);
-    appendStringInfo(&query,
-        "SELECT json_array_elements(('%s'::jsonb #> '{features_info,categorical_features}')::json)"
-        " #>> '{feature_id}'", buf);
-
-    tuptable = SPI_tuptable;
-
-
-
-    ret = SPI_exec(query.data, 0);
-    tuptable = SPI_tuptable;
-
-    if (ret < 1 || tuptable == NULL)
-    {
-        elog(ERROR, "Query errorcode=%d", ret);
-    }
-
-    tuptable = SPI_tuptable;
-    if (tuptable == NULL)
-        elog(ERROR,"tuptable is null");
-
-    tupdesc = tuptable->tupdesc;
-
-    resetStringInfo(&out);
-    if (SPI_processed > 0)
-    {
-        appendStringInfo(&out,"\ncategorial feature:");
-        for (i = 0; i < SPI_processed; i++)
-        {
-            char *val = SPI_getvalue(tuptable->vals[i], tupdesc, 1);    
-            appendStringInfo(&out, "%s,", val);
-            elog(WARNING, "%s len=%d\t%s", out.data, out.len, val);
-            pfree(val);
-        }
-        
-        // p = out2.data + out2.len - 1;
-        // *p = ' ';
-    }
-    else
-    {
-        appendStringInfo(&out,"none categorial feature\n");
-    }
-
-    SPI_finish();
-
-    elog(WARNING, "****%s", out.data);
-    elog(WARNING, "####%s", out2);
-    /* Reset our memory context and switch back to the original one */
-    appendStringInfo(&out,"%s" ,out2);
-
-    MemoryContextSwitchTo(oldcontext);    
-    MemoryContextDelete(ml_context);
-
-    PG_RETURN_TEXT_P(cstring_to_text(out.data));
-}
-
 
 
 static Datum
@@ -1655,18 +1915,6 @@ FeatureTypeGetDatum(char* featureName, char* featureType,
     return (Datum) HeapTupleGetDatum(htuple);
 }
 
-/*
- * see ReceiveResults(WorkerSession *session, bool storeRows)
- *
- */
-Datum
-ml_test(PG_FUNCTION_ARGS)
-{
-
-
-
-    PG_RETURN_TEXT_P(NULL);
-}
 
 /*
  * Check existing model folder

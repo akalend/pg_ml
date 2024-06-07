@@ -1,4 +1,5 @@
 SELECT ml_predict_table('titanic.cbm', 'titanic', '{name,passenger_id,pclass,sex,sibsp,parch,ticket,cabin,embarked }');
+WARNING:  This function is depricated
 NOTICE:  table "titanic_predict" does not exist, skipping
     ml_predict_table    
 ------------------------
