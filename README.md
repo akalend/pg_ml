@@ -15,7 +15,7 @@ The libcatboostmodel must be 1.2.5 version.
 ```
 
 ## folders
-[docs](https://github.com/akalend/pg_ml/tree/main/dcos) - documentation in slides:
+[docs](https://github.com/akalend/pg_ml/tree/main/docs) - documentation in slides:
 
 - [russian](https://github.com/akalend/pg_ml/blob/main/docs/pg_ml_rus.pdf)
 
