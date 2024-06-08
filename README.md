@@ -169,7 +169,7 @@ row |       alpha       |       delta        |    u     |    g     |    r     | 
 SELECT ml_predict_table('boston.cbt', 'boston');
 
 --- the dataset of the prediction
-SELECT * from  ml_cat_predict('boston.cbm', 'boston2') LIMIT 3;
+SELECT * from  ml_predict('boston.cbm', 'boston2') LIMIT 3;
  row_num |      predict       | class 
 ---------+--------------------+-------
        0 |  24.99982028068538 | 
@@ -178,7 +178,7 @@ SELECT * from  ml_cat_predict('boston.cbm', 'boston2') LIMIT 3;
 (3 rows)
 
 --- You can join dataset with other tables
-WITH  predict  AS (  SELECT * from ml_cat_predict('astra3.cbm', 'astra'))
+WITH  predict  AS (  SELECT * from ml_predict('astra3.cbm', 'astra'))
     SELECT * FROM astra a 
        LEFT JOIN predict p ON (p.row_num = a.row)   ;
  row |       alpha       |       delta        |    u     |    g     |    r     |    i     |    z     | run_id | cam_col | field_id |      spec_obj_id       |   redshift    | plate |  mjd  | fiber_id | row_num |      predict       | class  
@@ -206,7 +206,9 @@ SELECT * FROM
  (5 rows)
 
 WITH  predict AS ( 
-    SELECT   index::int AS id,  class  FROM  ml_text_predict('rating_txt.cbm','rating_txt','{rating_MPAA,studio,fresh,critic,top_critic,publisher}', 
+    SELECT   index::int AS id,  class  FROM  ml_text_predict(
+        'rating_txt.cbm','rating_txt',
+        '{rating_MPAA,studio,fresh,critic,top_critic,publisher}', 
         '{synopsis,genre,director,writer,review}',
         'id'
     )
@@ -247,16 +249,17 @@ ALTER DATABASE
 ALTER DATABASE
 ALTER DATABASE
 ============== running regression test queries        ==============
-test ml                           ... ok          210 ms
-test init                         ... ok           45 ms
-test astra                        ... ok          165 ms
-test titanic                      ... ok          150 ms
-test text                         ... ok          183 ms
+test ml                           ... ok          212 ms
+test init                         ... ok           59 ms
+test astra                        ... ok          166 ms
+test titanic                      ... ok          134 ms
+test boston                       ... ok           45 ms
+test text                         ... ok          178 ms
 ============== shutting down postmaster               ==============
 ============== removing temporary instance            ==============
 
 =====================
- All 5 tests passed. 
+ All 6 tests passed. 
 =====================
 
 ```

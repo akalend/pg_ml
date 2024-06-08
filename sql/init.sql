@@ -68,3 +68,23 @@ CREATE TABLE public.rating_txt(
 COPY rating_txt FROM '/tmp/model/rating_txt.csv' HEADER CSV; 
 SELECT rating_10,critic,box_office FROM rating_txt LIMIT 4;
 
+CREATE TABLE public.boston (
+    id bigint,
+    crim double precision,
+    zn double precision,
+    indus double precision,
+    chas bigint,
+    nox double precision,
+    rm double precision,
+    age double precision,
+    dis double precision,
+    rad bigint,
+    tax bigint,
+    ptratio double precision,
+    black double precision,
+    lstat double precision,
+    medv double precision
+);
+COPY boston FROM '/tmp/model/boston.csv' HEADER CSV; 
+SELECT * FROM boston LIMIT 3;
+

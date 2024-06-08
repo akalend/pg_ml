@@ -35,6 +35,7 @@ cmd = [ '../../src/test/regress/pg_regress',
 		'init',		# init.sql
 		'astra',	# astra.sql
 		'titanic',	# titanic.sql
+		'boston',	# boston.sql
 		'text',		# text feature
 	  ]
 

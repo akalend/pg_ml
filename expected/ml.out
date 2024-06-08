@@ -39,3 +39,10 @@ SELECT ml_info('rating_txt.cbm');
  fieldName:synopsis,rating_MPAA,genre,director,writer,box_office,runtime,studio,dvd_date_int,theater_date_int,review,fresh,critic,top_critic,publisher,date_int 
 (1 row)
 
+SELECT ml_info('boston.cbm');
+                                        ml_info                                         
+----------------------------------------------------------------------------------------
+ dimension:1 numeric features:13 categorial features:0 text features:0 modelType "RMSE"+
+ fieldName:crim,zn,indus,chas,nox,rm,age,dis,rad,tax,ptratio,black,lstat 
+(1 row)
+

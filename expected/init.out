@@ -80,3 +80,29 @@ SELECT rating_10,critic,box_office FROM rating_txt LIMIT 4;
          9 | Greg Maki    |  177575142
 (4 rows)
 
+CREATE TABLE public.boston (
+    id bigint,
+    crim double precision,
+    zn double precision,
+    indus double precision,
+    chas bigint,
+    nox double precision,
+    rm double precision,
+    age double precision,
+    dis double precision,
+    rad bigint,
+    tax bigint,
+    ptratio double precision,
+    black double precision,
+    lstat double precision,
+    medv double precision
+);
+COPY boston FROM '/tmp/model/boston.csv' HEADER CSV; 
+SELECT * FROM boston LIMIT 3;
+ id |  crim   | zn | indus | chas |  nox  |  rm   | age  |  dis   | rad | tax | ptratio | black  | lstat | medv 
+----+---------+----+-------+------+-------+-------+------+--------+-----+-----+---------+--------+-------+------
+  0 | 0.00632 | 18 |  2.31 |    0 | 0.538 | 6.575 | 65.2 |   4.09 |   1 | 296 |    15.3 |  396.9 |  4.98 |   24
+  1 | 0.02731 |  0 |  7.07 |    0 | 0.469 | 6.421 | 78.9 | 4.9671 |   2 | 242 |    17.8 |  396.9 |  9.14 | 21.6
+  2 | 0.02729 |  0 |  7.07 |    0 | 0.469 | 7.185 | 61.1 | 4.9671 |   2 | 242 |    17.8 | 392.83 |  4.03 | 34.7
+(3 rows)
+

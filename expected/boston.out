@@ -1,0 +1,8 @@
+SELECT index,predict  FROM ml_predict('boston.cbm','boston','{}','id') LIMIT 3;
+ index |      predict       
+-------+--------------------
+ 0     |  24.99982028068538
+ 1     | 20.664358727562394
+ 2     |  33.67737911788664
+(3 rows)
+

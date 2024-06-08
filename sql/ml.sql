@@ -8,5 +8,6 @@ SELECT ml_info('astra3.cbm');
 SELECT ml_info('titanic.cbm');
 SELECT ml_info('adult.cbm');
 SELECT ml_info('rating_txt.cbm');
+SELECT ml_info('boston.cbm');
 
 
